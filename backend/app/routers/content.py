@@ -1,3 +1,107 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date
+from app.database import get_db
+from app.models import Content, ContentSegment
 
 router = APIRouter()
+
+
+@router.get("/content/today")
+async def get_today_content(db: AsyncSession = Depends(get_db)):
+    stmt = select(Content).where(Content.date == date.today()).order_by(Content.id)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+    return [
+        {
+            "id": c.id, "type": c.type, "title": c.title, "source": c.source,
+            "url": c.url, "difficulty": c.difficulty, "date": str(c.date),
+            "segment_count": c.segment_count, "has_subtitles": c.has_subtitles,
+            "duration": c.duration, "read_time": c.read_time,
+            "preview_word_count": len(c.preview_words_json) if c.preview_words_json else 0,
+            "summary_zh": c.summary_zh,
+        }
+        for c in items
+    ]
+
+
+@router.get("/content/history")
+async def get_content_history(date: str | None = None, db: AsyncSession = Depends(get_db)):
+    stmt = select(Content).order_by(Content.date.desc())
+    if date:
+        stmt = stmt.where(Content.date == date)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+    return [
+        {"id": c.id, "type": c.type, "title": c.title, "source": c.source,
+         "difficulty": c.difficulty, "date": str(c.date),
+         "segment_count": c.segment_count, "has_subtitles": c.has_subtitles}
+        for c in items
+    ]
+
+
+@router.post("/content/refresh")
+async def refresh_content(db: AsyncSession = Depends(get_db)):
+    return {"status": "ok", "message": "Use cron script to re-run pipeline"}
+
+
+@router.get("/content/{content_id}")
+async def get_content_detail(content_id: int, db: AsyncSession = Depends(get_db)):
+    stmt = select(Content).where(Content.id == content_id)
+    result = await db.execute(stmt)
+    c = result.scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return {
+        "id": c.id, "type": c.type, "title": c.title, "source": c.source,
+        "url": c.url, "difficulty": c.difficulty, "date": str(c.date),
+        "content_text": c.content_text, "summary_zh": c.summary_zh,
+        "segment_count": c.segment_count, "has_subtitles": c.has_subtitles,
+        "audio_path": c.audio_path, "words_json": c.words_json,
+        "preview_words_json": c.preview_words_json,
+    }
+
+
+@router.get("/content/{content_id}/segments")
+async def get_segments(content_id: int, db: AsyncSession = Depends(get_db)):
+    stmt = select(ContentSegment).where(ContentSegment.content_id == content_id).order_by(ContentSegment.segment_index)
+    result = await db.execute(stmt)
+    segs = result.scalars().all()
+    return [
+        {"id": s.id, "content_id": s.content_id, "segment_index": s.segment_index,
+         "title": s.title, "start_time": s.start_time, "end_time": s.end_time,
+         "text_en": s.text_en, "summary_zh": s.summary_zh,
+         "audio_en_path": s.audio_en_path,
+         "preview_words_json": s.preview_words_json, "words_json": s.words_json,
+         "is_completed": s.is_completed}
+        for s in segs
+    ]
+
+
+@router.get("/content/{content_id}/segments/{idx}")
+async def get_segment(content_id: int, idx: int, db: AsyncSession = Depends(get_db)):
+    stmt = select(ContentSegment).where(
+        ContentSegment.content_id == content_id, ContentSegment.segment_index == idx)
+    result = await db.execute(stmt)
+    s = result.scalar_one_or_none()
+    if not s:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    audio_url = f"/static/audio/{s.audio_en_path}" if s.audio_en_path else None
+    return {"id": s.id, "content_id": s.content_id, "segment_index": s.segment_index,
+            "title": s.title, "text_en": s.text_en, "summary_zh": s.summary_zh,
+            "audio_url": audio_url, "preview_words_json": s.preview_words_json,
+            "words_json": s.words_json, "is_completed": s.is_completed}
+
+
+@router.post("/content/{content_id}/segments/{idx}/complete")
+async def mark_segment_complete(content_id: int, idx: int, db: AsyncSession = Depends(get_db)):
+    stmt = select(ContentSegment).where(
+        ContentSegment.content_id == content_id, ContentSegment.segment_index == idx)
+    result = await db.execute(stmt)
+    s = result.scalar_one_or_none()
+    if not s:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    s.is_completed = True
+    await db.commit()
+    return {"status": "ok"}
