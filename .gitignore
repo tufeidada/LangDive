@@ -1,6 +1,7 @@
 .env
 service-account.json
 venv/
+.venv/
 node_modules/
 __pycache__/
 data/audio/*.mp3

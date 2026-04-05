@@ -1,0 +1,10 @@
+import pytest
+from sqlalchemy import text
+from app.database import async_engine
+
+
+@pytest.mark.asyncio
+async def test_database_connection():
+    async with async_engine.connect() as conn:
+        result = await conn.execute(text("SELECT 1"))
+        assert result.scalar() == 1
