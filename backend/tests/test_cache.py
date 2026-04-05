@@ -13,7 +13,6 @@ async def setup_tables():
     yield
     async with async_engine.begin() as conn:
         await conn.execute(text("DELETE FROM cached_asset"))
-    await async_engine.dispose()
 
 
 @pytest.mark.asyncio
