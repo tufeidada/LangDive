@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import Home from './pages/Home'
 import ContentDetail from './pages/ContentDetail'
 import Review from './pages/Review'
+import Settings from './pages/Settings'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
             <div className="flex gap-4">
               <NavLink to="/" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Home</NavLink>
               <NavLink to="/review" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Review</NavLink>
+              <NavLink to="/settings" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Settings</NavLink>
             </div>
           </div>
         </nav>
@@ -21,6 +23,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/content/:id" element={<ContentDetail />} />
             <Route path="/review" element={<Review />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
       </div>
