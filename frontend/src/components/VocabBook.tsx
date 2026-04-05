@@ -1,4 +1,4 @@
-// src/components/VocabBook.tsx (placeholder - full implementation in Task 9)
+// src/components/VocabBook.tsx
 import { useState, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { getVocab, updateWordStatus } from '../services/api'
