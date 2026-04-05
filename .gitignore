@@ -1,0 +1,11 @@
+.env
+service-account.json
+venv/
+node_modules/
+__pycache__/
+data/audio/*.mp3
+frontend/dist/
+*.pyc
+.DS_Store
+.pytest_cache/
+*.egg-info/
