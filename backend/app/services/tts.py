@@ -1,29 +1,45 @@
 import logging
 import asyncio
+import json
+import base64
+import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _google_synthesize(text: str) -> bytes:
-    from google.cloud import texttospeech
-    client = texttospeech.TextToSpeechClient()
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="en-US",
-        name="en-US-Neural2-D",
+def _get_google_access_token() -> str:
+    """Get OAuth2 access token from service account JSON."""
+    import google.auth
+    import google.auth.transport.requests
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3,
-        sample_rate_hertz=24000,
-    )
-    response = client.synthesize_speech(
-        input=synthesis_input, voice=voice, audio_config=audio_config
-    )
-    return response.audio_content
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token
+
+
+async def _google_synthesize_rest(text: str) -> bytes:
+    """Call Google TTS via REST API (works through HTTP proxy)."""
+    token = await asyncio.get_event_loop().run_in_executor(None, _get_google_access_token)
+    payload = {
+        "input": {"text": text},
+        "voice": {"languageCode": "en-US", "name": "en-US-Neural2-D"},
+        "audioConfig": {"audioEncoding": "MP3", "sampleRateHertz": 24000},
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://texttospeech.googleapis.com/v1/text:synthesize",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        audio_b64 = resp.json()["audioContent"]
+        return base64.b64decode(audio_b64)
 
 
 def _qwen_synthesize(text: str) -> bytes:
+    """Call Qwen TTS via DashScope SDK."""
     import dashscope
     import urllib.request
     resp = dashscope.audio.qwen_tts.SpeechSynthesizer.call(
@@ -47,11 +63,9 @@ async def generate_segment_audio(text: str, output_path: str) -> str:
     all_audio = b""
     for para in paragraphs:
         audio_bytes = None
-        # Try Google first
+        # Try Google REST API first (works through proxy)
         try:
-            audio_bytes = await asyncio.get_event_loop().run_in_executor(
-                None, _google_synthesize, para
-            )
+            audio_bytes = await _google_synthesize_rest(para)
         except Exception as e:
             logger.warning(f"Google TTS failed, falling back to Qwen: {e}")
 
