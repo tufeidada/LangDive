@@ -131,3 +131,63 @@ class SearchQueryLog(Base):
     result_count: Mapped[int | None] = mapped_column(Integer)
     date: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentSource(Base):
+    __tablename__ = "content_source"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    extra_config: Mapped[dict | None] = mapped_column(JSON)
+    layer: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    priority: Mapped[int] = mapped_column(Integer, default=50)
+    quality_score: Mapped[float] = mapped_column(Float, default=0.5)
+    default_difficulty: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[dict | None] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_fetched: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetch_error_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    candidates: Mapped[list["ContentCandidate"]] = relationship(back_populates="source")
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('youtube_channel', 'newsletter_rss', 'blog_rss', 'hn_api', 'classic_library')"
+        ),
+        CheckConstraint("layer IN (1, 2, 3)"),
+    )
+
+
+class ContentCandidate(Base):
+    __tablename__ = "content_candidate"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("content_source.id"))
+    source_layer: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str | None] = mapped_column(Text)
+    estimated_difficulty: Mapped[str | None] = mapped_column(Text)
+    estimated_word_count: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[str | None] = mapped_column(Text)
+    thumbnail_url: Mapped[str | None] = mapped_column(Text)
+    duration: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ai_score: Mapped[float | None] = mapped_column(Float)
+    ai_reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    content_id: Mapped[int | None] = mapped_column(ForeignKey("content.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source: Mapped["ContentSource | None"] = relationship(back_populates="candidates")
+    content: Mapped["Content | None"] = relationship()
+    __table_args__ = (
+        CheckConstraint("type IN ('article', 'video')"),
+        CheckConstraint(
+            "status IN ('pending', 'selected', 'rejected', 'user_promoted', "
+            "'user_rejected', 'user_submitted', 'library', 'library_used')"
+        ),
+        UniqueConstraint("url", "date"),
+        Index("idx_candidate_date_status", "date", "status"),
+        Index("idx_candidate_source", "source_id"),
+    )
