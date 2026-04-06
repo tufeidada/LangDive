@@ -4,7 +4,8 @@ venv/
 .venv/
 node_modules/
 __pycache__/
-data/audio/*.mp3
+backend/data/audio/*.mp3
+backend/data/audio/*.wav
 frontend/dist/
 *.pyc
 .DS_Store
