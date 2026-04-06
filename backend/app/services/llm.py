@@ -5,18 +5,19 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "qwen/qwen3.6-plus:free"
+# 阿里云百炼 (DashScope) OpenAI 兼容接口
+API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+MODEL = "qwen-plus"
 MAX_RETRIES = 3
 
 async def call_llm(
     system_prompt: str,
     user_prompt: str,
     json_mode: bool = False,
-    timeout: float = 60.0,
+    timeout: float = 120.0,
 ) -> str:
     headers = {
-        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -33,9 +34,9 @@ async def call_llm(
     for attempt in range(MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+                resp = await client.post(API_URL, json=payload, headers=headers)
                 if resp.status_code == 200:
-                    data = await resp.json() if asyncio.iscoroutinefunction(resp.json) else resp.json()
+                    data = resp.json()
                     return data["choices"][0]["message"]["content"]
                 logger.warning(f"LLM API returned {resp.status_code}: {resp.text}")
         except httpx.TimeoutException:

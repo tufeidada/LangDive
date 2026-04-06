@@ -1,11 +1,11 @@
 import pytest
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.llm import call_llm
 
 @pytest.mark.asyncio
 async def test_call_llm_returns_content():
-    mock_response = AsyncMock()
+    mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "choices": [{"message": {"content": "test response"}}]
@@ -21,7 +21,7 @@ async def test_call_llm_returns_content():
 
 @pytest.mark.asyncio
 async def test_call_llm_json_mode():
-    mock_response = AsyncMock()
+    mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "choices": [{"message": {"content": '[{"word": "test"}]'}}]
