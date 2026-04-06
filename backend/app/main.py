@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import content, vocab, settings as settings_router, events
+from app.routers import content, vocab, settings as settings_router, events, candidates, sources
 
 app = FastAPI(title="LangDive API")
 
@@ -26,6 +26,8 @@ app.include_router(content.router, prefix="/api")
 app.include_router(vocab.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
+app.include_router(candidates.router, prefix="/api")
+app.include_router(sources.router, prefix="/api")
 
 
 @app.get("/api/health")

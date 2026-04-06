@@ -1,9 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database import get_db
-from app.models import Content, ContentSegment
+from app.models import Content, ContentSegment, ContentCandidate
+from app.pipeline.steps import (
+    step3_extract_content,
+    step4_segment_annotate_summarize,
+    step7_generate_tts,
+    step8_translate_videos,
+    step9_store,
+)
 
 router = APIRouter()
 
@@ -51,6 +61,67 @@ async def get_content_history(date: str | None = None, db: AsyncSession = Depend
 @router.post("/content/refresh")
 async def refresh_content(db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "message": "Use cron script to re-run pipeline"}
+
+
+class SubmitUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/content/submit-url")
+async def submit_url(body: SubmitUrlRequest, db: AsyncSession = Depends(get_db)):
+    """User submits a URL: create candidate with status='user_submitted', run pipeline steps 3-9.
+
+    Processing is synchronous (30-60s acceptable for single user).
+    """
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url must not be empty")
+
+    # Detect type: YouTube vs article
+    is_video = "youtube.com" in url or "youtu.be" in url
+    content_type = "video" if is_video else "article"
+
+    # Create candidate record
+    candidate = ContentCandidate(
+        title=url,  # title will be updated after extraction
+        url=url,
+        source_id=None,
+        source_layer=0,
+        type=content_type,
+        status="user_submitted",
+        date=date.today(),
+    )
+    db.add(candidate)
+    await db.commit()
+    await db.refresh(candidate)
+
+    # Build item dict for pipeline
+    item = {
+        "candidate_id": candidate.id,
+        "title": url,
+        "url": url,
+        "type": content_type,
+        "source": "user_submitted",
+        "difficulty": None,
+        "video_id": None,
+        "duration": None,
+    }
+
+    # Steps 3-9 synchronously
+    items = await step3_extract_content([item])
+    items = await step4_segment_annotate_summarize(items)
+    items = await step7_generate_tts(items)
+    items = await step8_translate_videos(items)
+    await step9_store(items)
+
+    # Reload candidate to get content_id set by step9_store
+    await db.refresh(candidate)
+
+    return {
+        "candidate_id": candidate.id,
+        "content_id": candidate.content_id,
+        "status": "completed",
+    }
 
 
 @router.get("/content/{content_id}")
