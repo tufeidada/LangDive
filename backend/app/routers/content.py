@@ -68,11 +68,20 @@ async def get_segments(content_id: int, db: AsyncSession = Depends(get_db)):
     stmt = select(ContentSegment).where(ContentSegment.content_id == content_id).order_by(ContentSegment.segment_index)
     result = await db.execute(stmt)
     segs = result.scalars().all()
+    def _audio_url(path: str | None) -> str | None:
+        if not path:
+            return None
+        # Strip directory prefix, keep just filename
+        import os
+        filename = os.path.basename(path)
+        return f"/static/audio/{filename}"
+
     return [
         {"id": s.id, "content_id": s.content_id, "segment_index": s.segment_index,
          "title": s.title, "start_time": s.start_time, "end_time": s.end_time,
          "text_en": s.text_en, "summary_zh": s.summary_zh,
          "audio_en_path": s.audio_en_path,
+         "audio_url": _audio_url(s.audio_en_path),
          "preview_words_json": s.preview_words_json, "words_json": s.words_json,
          "is_completed": s.is_completed}
         for s in segs

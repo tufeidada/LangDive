@@ -29,24 +29,18 @@ async def test_search_youtube_returns_videos():
         assert results[0]["video_id"] == "abc123"
 
 def test_fetch_transcript_returns_subtitles():
-    mock_snippet = MagicMock()
-    mock_snippet.text = "Hello world"
-    mock_snippet.start = 0.0
-    mock_snippet.duration = 2.5
-    mock_snippet2 = MagicMock()
-    mock_snippet2.text = "This is a test"
-    mock_snippet2.start = 2.5
-    mock_snippet2.duration = 3.0
-    mock_transcript = MagicMock()
-    mock_transcript.__iter__ = MagicMock(return_value=iter([mock_snippet, mock_snippet2]))
+    mock_transcript = [
+        {"text": "Hello world", "start": 0.0, "duration": 2.5},
+        {"text": "This is a test", "start": 2.5, "duration": 3.0},
+    ]
     with patch("app.services.youtube.YouTubeTranscriptApi") as MockApi:
-        MockApi.return_value.fetch.return_value = mock_transcript
+        MockApi.get_transcript.return_value = mock_transcript
         result = fetch_transcript("abc123")
         assert len(result) == 2
         assert result[0]["text"] == "Hello world"
 
 def test_fetch_transcript_no_subtitles():
     with patch("app.services.youtube.YouTubeTranscriptApi") as MockApi:
-        MockApi.return_value.fetch.side_effect = Exception("No subtitles")
+        MockApi.get_transcript.side_effect = Exception("No subtitles")
         result = fetch_transcript("abc123")
         assert result is None

@@ -46,11 +46,10 @@ def fetch_transcript(video_id: str, languages: list[str] | None = None) -> list[
     if languages is None:
         languages = ["en"]
     try:
-        ytt = YouTubeTranscriptApi()
-        transcript = ytt.fetch(video_id, languages=languages)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
         return [
-            {"text": snippet.text, "start": snippet.start, "duration": snippet.duration}
-            for snippet in transcript
+            {"text": entry["text"], "start": entry["start"], "duration": entry["duration"]}
+            for entry in transcript
         ]
     except Exception as e:
         logger.warning(f"No transcript for {video_id}: {e}")

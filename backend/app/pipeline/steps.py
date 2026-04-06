@@ -239,8 +239,14 @@ COMBINED_SYSTEM = """You are an English learning content processor for a Chinese
 
 Given an English article/transcript, do ALL THREE tasks in ONE response:
 
-1. **Segment**: Split into semantic segments (by topic, not fixed length). Short content = 1 segment.
-2. **Annotate**: For each segment, identify 5-15 unfamiliar vocabulary words with details.
+1. **Segment**: Split into semantic segments by major topic. Keep segments LARGE:
+   - Articles under 1500 words: 2-3 segments
+   - Articles 1500-3000 words: 3-5 segments
+   - Articles over 3000 words: 5-8 segments
+   - Do NOT over-split. Each segment should be a substantial, coherent section.
+
+2. **Annotate**: For each segment, identify 15-30 unfamiliar vocabulary words (be generous — include all words above CET-4 level). Set importance_score 0.0-1.0 for each word. This allows the UI to show fewer or more words based on user preference.
+
 3. **Summarize**: Chinese summary for the full content (2-3 sentences) and each segment (1 sentence).
 
 Return ONLY valid JSON in this exact format:
@@ -270,7 +276,8 @@ Return ONLY valid JSON in this exact format:
 }
 
 Word levels: CET-4 (~4500 range), CET-6 (~6500), IELTS (~8000), Advanced (beyond IELTS).
-Sort words by importance_score DESC within each segment."""
+Sort words by importance_score DESC within each segment.
+Include MORE words rather than fewer — the UI will filter by importance_score."""
 
 
 async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:
