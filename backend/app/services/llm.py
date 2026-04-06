@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # 阿里云百炼 (DashScope) OpenAI 兼容接口
 API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-MODEL = "qwen-plus"
+MODEL = "qwen-turbo"
 MAX_RETRIES = 3
 
 async def call_llm(
