@@ -3,6 +3,7 @@ import Home from './pages/Home'
 import ContentDetail from './pages/ContentDetail'
 import Review from './pages/Review'
 import Settings from './pages/Settings'
+import Pool from './pages/Pool'
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
             <Route path="/content/:id" element={<ContentDetail />} />
             <Route path="/review" element={<Review />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/pool" element={<Pool />} />
           </Routes>
         </main>
       </div>

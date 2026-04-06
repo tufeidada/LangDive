@@ -41,6 +41,26 @@ export const getSettings = () => fetchJSON<Record<string, string>>('/settings')
 export const updateSettings = (updates: Record<string, string>) =>
   fetchJSON('/settings', { method: 'PUT', body: JSON.stringify(updates) })
 
+// Content Pool (admin)
+export const getCandidates = (date?: string) =>
+  fetchJSON<any>(`/candidates${date ? `?date=${date}` : ''}`)
+export const promoteCandidate = (id: number) =>
+  fetchJSON<{ candidate_id: number; content_id: number }>(`/candidates/${id}/promote`, { method: 'PUT' })
+export const rejectCandidate = (id: number) =>
+  fetchJSON<any>(`/candidates/${id}/reject`, { method: 'PUT' })
+export const getSources = () => fetchJSON<any[]>('/sources')
+export const addSource = (data: any) =>
+  fetchJSON<any>('/sources', { method: 'POST', body: JSON.stringify(data) })
+export const updateSource = (id: number, data: any) =>
+  fetchJSON<any>(`/sources/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteSource = (id: number) =>
+  fetchJSON<any>(`/sources/${id}`, { method: 'DELETE' })
+export const submitUrl = (url: string) =>
+  fetchJSON<{ candidate_id: number; content_id: number; status: string }>(
+    '/content/submit-url',
+    { method: 'POST', body: JSON.stringify({ url }) }
+  )
+
 // Events (fire-and-forget)
 export const logEvent = (event_type: string, data: Record<string, any> = {}) => {
   fetch(`${BASE}/events`, {
