@@ -29,16 +29,7 @@ export default function ContentDetail() {
         setContent(c)
         setSegments(s)
         log('content_open', { content_id: numId })
-        // Videos don't have a "full" article view — go to segments
-        if (c.type === 'video') {
-          if (s.length === 1) {
-            setActiveSegment(s[0])
-            setPhase(s[0].preview_words_json?.length ? 'preview' : 'segment-reading')
-          } else {
-            setPhase('segments')
-          }
-        }
-        // Articles default to 'full' (already set)
+        // All content types default to 'full' (already set)
       })
       .finally(() => setLoading(false))
   }, [id])
@@ -65,6 +56,18 @@ export default function ContentDetail() {
     return merged
   }, [segments])
 
+  // Collect all audio URLs for sequential playback in full mode
+  const fullModeAudioUrls = useMemo((): string[] => {
+    return segments.map(s => s.audio_url).filter((u): u is string => Boolean(u))
+  }, [segments])
+
+  // Extract YouTube video ID from a URL
+  function extractVideoId(url: string | null | undefined): string | null {
+    if (!url) return null
+    const m = url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/)
+    return m ? m[1] : null
+  }
+
   // A synthetic segment used by ArticleReader in full mode (only needs segment_index + is_completed)
   const fullModeSyntheticSegment = useMemo((): Segment | null => {
     if (!segments.length) return null
@@ -78,7 +81,7 @@ export default function ContentDetail() {
 
   const handleSelectSegment = (seg: Segment) => {
     setActiveSegment(seg)
-    setPhase(seg.preview_words_json?.length ? 'preview' : 'segment-reading')
+    setPhase('segment-reading')
     log('segment_start', { content_id: content?.id, segment_index: seg.segment_index })
   }
 
@@ -88,7 +91,7 @@ export default function ContentDetail() {
 
   const handleBack = () => {
     if (phase === 'segment-reading') {
-      setPhase('preview')
+      setPhase('segments')
     } else if (phase === 'preview') {
       setPhase('segments')
     } else if (phase === 'segments') {
@@ -120,7 +123,8 @@ export default function ContentDetail() {
     )
   }
 
-  const isAtRoot = phase === 'full' || (content.type === 'video' && phase === 'segments')
+  const videoId = extractVideoId(content.url)
+  const isAtRoot = phase === 'full' || phase === 'segments'
 
   return (
     <div>
@@ -141,7 +145,7 @@ export default function ContentDetail() {
       <div className="text-text-secondary text-sm mb-4">{content.source} {content.difficulty && `· ${content.difficulty}`}</div>
       {content.summary_zh && <p className="text-text-secondary text-sm mb-4 italic">{content.summary_zh}</p>}
 
-      {/* Full article view (default for articles) */}
+      {/* Full article/video view (default for all content types) */}
       {phase === 'full' && fullModeSyntheticSegment && (
         <div>
           {/* Mode switcher buttons */}
@@ -174,11 +178,25 @@ export default function ContentDetail() {
             })()}
           </div>
 
+          {/* YouTube embed for video content */}
+          {content.type === 'video' && videoId && (
+            <div className="aspect-video mb-4 rounded-lg overflow-hidden">
+              <iframe
+                src={`https://www.youtube.com/embed/${videoId}`}
+                title={content.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+          )}
+
           <ArticleReader
             segment={fullModeSyntheticSegment}
             contentId={content.id}
             overrideTextEn={fullArticleText}
             overrideWordsJson={fullArticleWords}
+            audioUrls={fullModeAudioUrls}
             hideComplete
           />
         </div>

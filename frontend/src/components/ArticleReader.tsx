@@ -1,14 +1,66 @@
 // src/components/ArticleReader.tsx
 import { useState, useCallback, useMemo } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Play, Pause } from 'lucide-react'
 import { markSegmentComplete } from '../services/api'
 import { useEventLogger } from '../hooks/useEventLogger'
 import WordPopup from './WordPopup'
 import GlossarySection from './GlossarySection'
 import AudioPlayer from './AudioPlayer'
 import AddWordModal from './AddWordModal'
+import { useAudio } from '../hooks/useAudio'
 import type { Segment, VocabWord } from '../types'
 import { LEVEL_COLORS } from '../types'
+
+const SPEEDS = [0.75, 1.0, 1.25, 1.5]
+
+/** Multi-track audio player — renders one track at a time, advances on end */
+function MultiTrackPlayer({ urls }: { urls: string[] }) {
+  const [index, setIndex] = useState(0)
+  const { log } = useEventLogger()
+
+  const handleEnded = useCallback(() => {
+    setIndex(i => Math.min(i + 1, urls.length - 1))
+  }, [urls.length])
+
+  const src = urls[index] ?? null
+  const { playing, currentTime, duration, speed, toggle, changeSpeed } = useAudio(src, handleEnded)
+
+  const handleToggle = () => {
+    toggle()
+    log('audio_play', { playing: !playing, track: index })
+  }
+
+  const formatTime = (t: number) => {
+    const m = Math.floor(t / 60)
+    const s = Math.floor(t % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="bg-card rounded-lg p-3 border border-border mb-4 flex items-center gap-3">
+      <button onClick={handleToggle} className="text-accent">
+        {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+      </button>
+      <div className="flex-1 text-xs text-text-secondary">
+        {formatTime(currentTime)} / {formatTime(duration || 0)}
+        {urls.length > 1 && (
+          <span className="ml-2 text-text-secondary/60">Part {index + 1}/{urls.length}</span>
+        )}
+      </div>
+      <div className="flex gap-1">
+        {SPEEDS.map(s => (
+          <button
+            key={s}
+            onClick={() => changeSpeed(s)}
+            className={`text-xs px-1.5 py-0.5 rounded ${speed === s ? 'bg-accent text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            {s}x
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 type DensityLevel = 'few' | 'medium' | 'all'
 
@@ -30,6 +82,8 @@ interface Props {
   // Optional overrides for full-article mode
   overrideTextEn?: string
   overrideWordsJson?: VocabWord[]
+  // Sequential audio tracks for full-article mode
+  audioUrls?: string[]
   // Hide complete button in full-article mode
   hideComplete?: boolean
 }
@@ -39,6 +93,7 @@ export default function ArticleReader({
   contentId,
   overrideTextEn,
   overrideWordsJson,
+  audioUrls,
   hideComplete,
 }: Props) {
   const { log } = useEventLogger()
@@ -144,7 +199,10 @@ export default function ArticleReader({
       </div>
 
       {/* Audio player */}
-      {segment.audio_url && <AudioPlayer src={segment.audio_url} />}
+      {audioUrls && audioUrls.length > 0
+        ? <MultiTrackPlayer urls={audioUrls} />
+        : segment.audio_url && <AudioPlayer src={segment.audio_url} />
+      }
 
       {/* Article text */}
       <div className="leading-7 text-text-primary text-base">

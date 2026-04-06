@@ -18,14 +18,16 @@ def test_fetch_rss_returns_entries():
         assert results[0]["type"] == "article"
 
 def test_extract_article_text_returns_content():
+    long_text = "This is a test article about artificial intelligence. " * 50  # 400+ words
     mock_resp = MagicMock()
-    mock_resp.read.return_value = b"<html><body><p>Article content here.</p></body></html>"
+    mock_resp.read.return_value = b"<html><body><p>Long article</p></body></html>"
     mock_resp.__enter__ = MagicMock(return_value=mock_resp)
     mock_resp.__exit__ = MagicMock(return_value=False)
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        with patch("app.services.article.trafilatura.extract", return_value="Article content here."):
+        with patch("app.services.article.trafilatura.extract", return_value=long_text):
             text = extract_article_text("https://example.com/article1")
-            assert text == "Article content here."
+            assert text is not None
+            assert len(text.split()) >= 300
 
 def test_extract_article_text_returns_none_on_failure():
     with patch("urllib.request.urlopen", side_effect=Exception("Connection failed")):

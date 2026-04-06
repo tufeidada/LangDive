@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 
 from app.services.llm import call_llm
-from app.services.youtube import search_youtube, fetch_transcript
+from app.services.youtube import search_youtube, fetch_transcript, filter_by_view_count
 from app.services.article import fetch_all_rss_candidates, extract_article_text
 from app.services.segmenter import segment_content
 from app.services.annotator import annotate_vocabulary
@@ -46,12 +46,15 @@ async def step1_fetch_candidates() -> list[dict]:
 
     system_prompt = (
         "You are a content curator for an English language learning platform targeting Chinese learners at B1-B2 level. "
-        "Generate diverse, engaging YouTube search queries for recent technology, science, or society topics."
+        "Focus on finding HIGH-QUALITY interview and discussion videos with experts, thought leaders, and industry professionals. "
+        "Prefer long-form conversations (10+ minutes) over short clips."
     )
     user_prompt = (
-        f"Generate 6-8 YouTube search queries for educational English content published in the last 7 days. "
+        f"Generate 6-8 YouTube search queries to find English interview/discussion videos on AI, technology, finance, management, or geopolitics. "
+        f"Include terms like 'interview', 'discussion', 'conversation', 'talk', 'podcast' in queries. "
+        f"Example good queries: 'AI expert interview 2025', 'tech CEO discussion future of work', 'finance podcast investment strategy'. "
         f"Avoid repeating these recent queries: {recent_str}. "
-        f"Return ONLY a JSON array of strings, e.g.: [\"query 1\", \"query 2\"]"
+        f"Return ONLY a JSON array of strings."
     )
 
     queries_raw = await call_llm(system_prompt, user_prompt)
@@ -94,6 +97,10 @@ async def step1_fetch_candidates() -> list[dict]:
 
         await session.commit()
 
+    # Filter YouTube by view count (min 10000 views)
+    if yt_results:
+        yt_results = await filter_by_view_count(yt_results, min_views=10000)
+
     # Fetch RSS articles
     rss_results: list[dict] = []
     try:
@@ -128,7 +135,10 @@ async def step2_filter_and_rank(candidates: list[dict]) -> list[dict]:
 
     system_prompt = (
         "You are an English content curator for a Chinese B1-B2 learner. "
-        "Select the 5 most educational, level-appropriate, and diverse items."
+        "Select the 5 most educational, level-appropriate, and diverse items. "
+        "Prefer articles from reputable sources (MIT Tech Review, BBC, Ars Technica, Nature, Wired, The Verge, The Guardian). "
+        "Avoid clickbait, listicles ('Top 10...'), opinion pieces, and outdated content (>6 months old). "
+        "Prefer in-depth analysis, news reports, expert interviews, and substantive discussions."
     )
     # Count available videos in candidates
     video_count = sum(1 for c in slim if c.get("type") == "video")
@@ -239,45 +249,43 @@ COMBINED_SYSTEM = """You are an English learning content processor for a Chinese
 
 Given an English article/transcript, do ALL THREE tasks in ONE response:
 
-1. **Segment**: Split into semantic segments by major topic. Keep segments LARGE:
-   - Articles under 1500 words: 2-3 segments
-   - Articles 1500-3000 words: 3-5 segments
-   - Articles over 3000 words: 5-8 segments
-   - Do NOT over-split. Each segment should be a substantial, coherent section.
+1. **Segment**: Split into semantic segments by major topic. Rules:
+   - Under 500 words: DO NOT split. Return exactly 1 segment with the full text.
+   - 500-1500 words: 2-3 segments (~300+ words each)
+   - 1500-3000 words: 4-6 segments (~300-400 words each)
+   - Over 3000 words: target ~300 words per segment
+   - Each segment MUST be at least 200 words. Do NOT create tiny segments.
 
-2. **Annotate**: For each segment, identify ALL unfamiliar vocabulary words (typically 15-40 per segment). Be GENEROUS — include every word above basic CET-4 level. Set importance_score 0.0-1.0 for each. The UI filters by importance_score, so more words = better. DO NOT limit to only 5 words per segment.
+2. **Annotate**: For each segment, identify 25-50 vocabulary words above CET-4 level.
+   CRITICAL: You MUST distribute importance_score across the full range:
+   - 5-10 words with importance_score 0.9-1.0 (essential topic-specific terms)
+   - 10-15 words with importance_score 0.6-0.8 (important but not critical)
+   - 10-15 words with importance_score 0.3-0.5 (nice-to-know, lower frequency)
+   This distribution is REQUIRED — the UI uses importance_score to filter density levels.
+   If all scores are above 0.8, the density filter breaks. Spread them out.
 
 3. **Summarize**: Chinese summary for the full content (2-3 sentences) and each segment (1 sentence).
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON:
 {
-  "summary_zh": "全文中文摘要（2-3句）",
+  "summary_zh": "全文中文摘要",
   "segments": [
     {
       "segment_index": 0,
-      "title": "Segment Title in English",
-      "text_en": "The full text of this segment...",
-      "summary_zh": "本段中文摘要（1句）",
+      "title": "Segment Title",
+      "text_en": "Full text of segment...",
+      "summary_zh": "本段中文摘要",
       "words": [
-        {
-          "word": "paradigm",
-          "ipa": "/ˈpærədaɪm/",
-          "freq_in_content": 2,
-          "importance_score": 0.9,
-          "meaning_zh": "范式",
-          "detail_zh": "一种模式或框架",
-          "example_en": "A paradigm shift in AI.",
-          "example_zh": "AI领域的范式转变。",
-          "level": "IELTS"
-        }
+        {"word": "paradigm", "ipa": "/ˈpærədaɪm/", "freq_in_content": 2, "importance_score": 0.95, "meaning_zh": "范式", "detail_zh": "一种模式或框架", "example_en": "A paradigm shift.", "example_zh": "范式转变。", "level": "IELTS"},
+        {"word": "leverage", "ipa": "/ˈlevərɪdʒ/", "freq_in_content": 1, "importance_score": 0.6, "meaning_zh": "利用", "detail_zh": "充分利用某事物", "example_en": "Leverage AI tools.", "example_zh": "利用AI工具。", "level": "CET-6"},
+        {"word": "albeit", "ipa": "/ɔːlˈbiːɪt/", "freq_in_content": 1, "importance_score": 0.35, "meaning_zh": "尽管", "detail_zh": "虽然，即使", "example_en": "Albeit slowly.", "example_zh": "尽管缓慢。", "level": "Advanced"}
       ]
     }
   ]
 }
 
-Word levels: CET-4 (~4500 range), CET-6 (~6500), IELTS (~8000), Advanced (beyond IELTS).
-Sort words by importance_score DESC within each segment.
-Include MORE words rather than fewer — the UI will filter by importance_score."""
+Word levels: CET-4 (~4500), CET-6 (~6500), IELTS (~8000), Advanced (beyond).
+Sort words by importance_score DESC. Include 25-50 words per segment with VARIED scores."""
 
 
 async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:

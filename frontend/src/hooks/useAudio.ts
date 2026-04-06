@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-export function useAudio(src: string | null) {
+export function useAudio(src: string | null, onEnded?: () => void) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [speed, setSpeed] = useState(1.0)
+  const onEndedRef = useRef(onEnded)
+  onEndedRef.current = onEnded
 
   useEffect(() => {
     if (!src) return
@@ -14,7 +16,10 @@ export function useAudio(src: string | null) {
     audio.playbackRate = speed
     audio.addEventListener('timeupdate', () => setCurrentTime(audio.currentTime))
     audio.addEventListener('loadedmetadata', () => setDuration(audio.duration))
-    audio.addEventListener('ended', () => setPlaying(false))
+    audio.addEventListener('ended', () => {
+      setPlaying(false)
+      onEndedRef.current?.()
+    })
     return () => { audio.pause(); audio.src = '' }
   }, [src])
 
