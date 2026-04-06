@@ -18,7 +18,6 @@ async def search_youtube(query: str, max_results: int = 5) -> list[dict]:
         "order": "date",
         "publishedAfter": seven_days_ago,
         "videoCaption": "closedCaption",
-        "videoCategoryId": "28",
         "maxResults": max_results,
         "key": settings.YOUTUBE_API_KEY,
     }

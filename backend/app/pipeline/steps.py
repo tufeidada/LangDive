@@ -130,8 +130,13 @@ async def step2_filter_and_rank(candidates: list[dict]) -> list[dict]:
         "You are an English content curator for a Chinese B1-B2 learner. "
         "Select the 5 most educational, level-appropriate, and diverse items."
     )
+    # Count available videos in candidates
+    video_count = sum(1 for c in slim if c.get("type") == "video")
+    video_instruction = "You MUST include 1-2 videos in your selection." if video_count > 0 else "No videos available, select 5 articles."
+
     user_prompt = (
-        f"From these {len(slim)} candidates, select exactly 5 items (max 2 videos). "
+        f"From these {len(slim)} candidates, select exactly 5 items. "
+        f"{video_instruction} "
         "For each selected item, add fields: difficulty (A2/B1/B2/C1), relevance (0.0-1.0). "
         "Prefer recent technology, science, society topics. Ensure diversity. "
         "Return ONLY a JSON array with the same fields plus difficulty and relevance:\n"
@@ -227,132 +232,137 @@ def _extract_video_id(url: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Step 4: Segment content
+# Steps 4+5+6 MERGED: Segment + Annotate + Summarize in ONE LLM call
 # ---------------------------------------------------------------------------
 
-async def step4_segment(items: list[dict]) -> list[dict]:
-    """Segment each item's content_text into semantic chunks."""
-    for item in items:
-        text = item.get("content_text") or ""
-        if not text.strip():
-            item["segments"] = []
-            continue
-        try:
-            segments = await segment_content(
-                text,
-                content_type=item.get("type", "article"),
-            )
-            item["segments"] = segments
-        except Exception as e:
-            logger.warning(f"Segmentation failed for '{item.get('title')}': {e}")
-            item["segments"] = [
-                {
-                    "segment_index": 0,
-                    "title": "Full Content",
-                    "start_time": None,
-                    "end_time": None,
-                    "text_en": text,
-                }
-            ]
-    return items
+COMBINED_SYSTEM = """You are an English learning content processor for a Chinese learner at B1-B2 level (~3500 word baseline, CET-4).
+
+Given an English article/transcript, do ALL THREE tasks in ONE response:
+
+1. **Segment**: Split into semantic segments (by topic, not fixed length). Short content = 1 segment.
+2. **Annotate**: For each segment, identify 5-15 unfamiliar vocabulary words with details.
+3. **Summarize**: Chinese summary for the full content (2-3 sentences) and each segment (1 sentence).
+
+Return ONLY valid JSON in this exact format:
+{
+  "summary_zh": "全文中文摘要（2-3句）",
+  "segments": [
+    {
+      "segment_index": 0,
+      "title": "Segment Title in English",
+      "text_en": "The full text of this segment...",
+      "summary_zh": "本段中文摘要（1句）",
+      "words": [
+        {
+          "word": "paradigm",
+          "ipa": "/ˈpærədaɪm/",
+          "freq_in_content": 2,
+          "importance_score": 0.9,
+          "meaning_zh": "范式",
+          "detail_zh": "一种模式或框架",
+          "example_en": "A paradigm shift in AI.",
+          "example_zh": "AI领域的范式转变。",
+          "level": "IELTS"
+        }
+      ]
+    }
+  ]
+}
+
+Word levels: CET-4 (~4500 range), CET-6 (~6500), IELTS (~8000), Advanced (beyond IELTS).
+Sort words by importance_score DESC within each segment."""
 
 
-# ---------------------------------------------------------------------------
-# Step 5: Annotate vocabulary with caching
-# ---------------------------------------------------------------------------
-
-async def step5_annotate(items: list[dict]) -> list[dict]:
-    """Annotate vocabulary for each segment; check cache before calling LLM."""
+async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:
+    """Combined step: segment + annotate + summarize in ONE LLM call per article."""
     async with AsyncSessionLocal() as session:
         for item in items:
-            all_preview_words: list[dict] = []
-            all_words: list[dict] = []
+            text = item.get("content_text") or ""
+            if not text.strip():
+                item["segments"] = []
+                item["summary_zh"] = None
+                item["words_json"] = []
+                item["preview_words_json"] = []
+                continue
 
-            for seg in item.get("segments", []):
-                text = seg.get("text_en", "")
-                if not text.strip():
-                    seg["words"] = []
-                    seg["preview_words"] = []
-                    continue
+            # Check cache
+            cache_key = content_hash(text)
+            cached = await get_cached(session, cache_key, "combined_analysis", provider="llm")
 
-                cache_key = content_hash(text)
-                cached = await get_cached(session, cache_key, "annotation", provider="llm")
+            if cached:
+                try:
+                    result = json.loads(cached)
+                except json.JSONDecodeError:
+                    result = None
+            else:
+                result = None
 
-                if cached:
-                    try:
-                        words = json.loads(cached)
-                    except json.JSONDecodeError:
-                        words = []
-                else:
-                    try:
-                        words = await annotate_vocabulary(text)
-                        await set_cached(
-                            session,
-                            cache_key,
-                            "annotation",
-                            text_content=json.dumps(words, ensure_ascii=False),
-                            provider="llm",
-                        )
-                        await session.commit()
-                    except Exception as e:
-                        logger.warning(f"Annotation failed: {e}")
-                        words = []
+            if not result:
+                try:
+                    content_type = item.get("type", "article")
+                    extra = ""
+                    if content_type == "video":
+                        extra = "\nThis is a video transcript. For segments, align to topic boundaries."
 
-                # Generate preview_words: top 5 by importance_score
+                    raw = await call_llm(
+                        COMBINED_SYSTEM,
+                        f"Process this English content ({len(text.split())} words):{extra}\n\n{text[:12000]}",
+                        timeout=180.0,
+                    )
+                    # Strip markdown fences if present
+                    content = raw.strip()
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+                    result = json.loads(content)
+
+                    # Cache the result
+                    await set_cached(
+                        session, cache_key, "combined_analysis",
+                        text_content=json.dumps(result, ensure_ascii=False),
+                        provider="llm",
+                    )
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"Combined analysis failed for '{item.get('title')}': {e}")
+                    # Fallback: single segment, no annotation
+                    result = {
+                        "summary_zh": None,
+                        "segments": [{
+                            "segment_index": 0, "title": "Full Content",
+                            "text_en": text, "summary_zh": None, "words": [],
+                        }]
+                    }
+
+            # Unpack result
+            item["summary_zh"] = result.get("summary_zh")
+            segments = result.get("segments", [])
+            all_words = []
+            all_preview = []
+
+            for i, seg in enumerate(segments):
+                seg["segment_index"] = i
+                words = seg.get("words", [])
                 preview = sorted(words, key=lambda w: w.get("importance_score", 0), reverse=True)[:5]
-                seg["words"] = words
                 seg["preview_words"] = preview
                 all_words.extend(words)
-                all_preview_words.extend(preview)
+                all_preview.extend(preview)
 
+            item["segments"] = segments
             item["words_json"] = all_words
-            item["preview_words_json"] = all_preview_words[:5]
+            item["preview_words_json"] = all_preview[:10]
 
     return items
 
 
-# ---------------------------------------------------------------------------
-# Step 6: Generate summaries
-# ---------------------------------------------------------------------------
+# Keep old step functions as aliases for backward compat in daily_pipeline.py
+async def step4_segment(items: list[dict]) -> list[dict]:
+    return items  # no-op, handled by combined step
+
+async def step5_annotate(items: list[dict]) -> list[dict]:
+    return items  # no-op, handled by combined step
 
 async def step6_generate_summary(items: list[dict]) -> list[dict]:
-    """Generate Chinese summaries for the full content and each segment."""
-    system_prompt = (
-        "You are a bilingual content summarizer. Produce concise, accurate Chinese summaries "
-        "that help language learners understand the topic quickly."
-    )
-
-    for item in items:
-        full_text = item.get("content_text") or ""
-        if full_text.strip():
-            try:
-                summary = await call_llm(
-                    system_prompt,
-                    f"Summarize the following English content in Chinese (2-3 sentences):\n\n{full_text[:8000]}",
-                )
-                item["summary_zh"] = summary
-            except Exception as e:
-                logger.warning(f"Summary generation failed for '{item.get('title')}': {e}")
-                item["summary_zh"] = None
-        else:
-            item["summary_zh"] = None
-
-        for seg in item.get("segments", []):
-            seg_text = seg.get("text_en", "")
-            if seg_text.strip():
-                try:
-                    seg_summary = await call_llm(
-                        system_prompt,
-                        f"Summarize the following English passage in Chinese (1-2 sentences):\n\n{seg_text[:4000]}",
-                    )
-                    seg["summary_zh"] = seg_summary
-                except Exception as e:
-                    logger.warning(f"Segment summary failed: {e}")
-                    seg["summary_zh"] = None
-            else:
-                seg["summary_zh"] = None
-
-    return items
+    return items  # no-op, handled by combined step
 
 
 # ---------------------------------------------------------------------------
