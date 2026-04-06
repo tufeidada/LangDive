@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 
 async def search_youtube(query: str, max_results: int = 5) -> list[dict]:
-    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     params = {
         "part": "snippet",
         "q": query,
         "type": "video",
-        "order": "date",
-        "publishedAfter": seven_days_ago,
-        "videoCaption": "closedCaption",
+        "order": "relevance",
+        "publishedAfter": thirty_days_ago,
+        "relevanceLanguage": "en",
         "maxResults": max_results,
         "key": settings.YOUTUBE_API_KEY,
     }
@@ -43,28 +43,14 @@ async def search_youtube(query: str, max_results: int = 5) -> list[dict]:
     ]
 
 def fetch_transcript(video_id: str) -> list[dict] | None:
+    """Fetch English transcript using youtube-transcript-api v1.x."""
     try:
-        # Try English first, then en-US, then any available with English translation
-        for langs in [["en"], ["en-US"], ["en-GB"]]:
-            try:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
-                return [
-                    {"text": entry["text"], "start": entry["start"], "duration": entry["duration"]}
-                    for entry in transcript
-                ]
-            except Exception:
-                continue
-        # Try auto-generated English
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        for t in transcript_list:
-            if t.language_code.startswith("en"):
-                entries = t.fetch()
-                return [
-                    {"text": e["text"], "start": e["start"], "duration": e["duration"]}
-                    for e in entries
-                ]
-        logger.warning(f"No English transcript for {video_id}")
-        return None
+        api = YouTubeTranscriptApi()
+        transcript = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+        return [
+            {"text": snippet.text, "start": snippet.start, "duration": snippet.duration}
+            for snippet in transcript
+        ]
     except Exception as e:
         logger.warning(f"No transcript for {video_id}: {e}")
         return None

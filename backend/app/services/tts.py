@@ -57,10 +57,31 @@ def _qwen_synthesize(text: str) -> bytes:
         return r.read()
 
 
-async def generate_segment_audio(text: str, output_path: str) -> str:
+def _split_text_for_tts(text: str, max_chars: int = 4000) -> list[str]:
+    """Split text into chunks safe for TTS APIs."""
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     if not paragraphs:
         paragraphs = [text]
+    # Further split any paragraph exceeding max_chars at sentence boundaries
+    chunks = []
+    for para in paragraphs:
+        if len(para) <= max_chars:
+            chunks.append(para)
+        else:
+            sentences = para.replace('. ', '.\n').split('\n')
+            current = ""
+            for sent in sentences:
+                if len(current) + len(sent) + 1 > max_chars and current:
+                    chunks.append(current.strip())
+                    current = sent
+                else:
+                    current = current + " " + sent if current else sent
+            if current.strip():
+                chunks.append(current.strip())
+    return chunks
+
+async def generate_segment_audio(text: str, output_path: str) -> str:
+    paragraphs = _split_text_for_tts(text)
 
     all_audio = b""
     for para in paragraphs:
