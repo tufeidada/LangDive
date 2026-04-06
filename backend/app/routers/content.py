@@ -96,7 +96,8 @@ async def get_segment(content_id: int, idx: int, db: AsyncSession = Depends(get_
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Segment not found")
-    audio_url = f"/static/audio/{s.audio_en_path}" if s.audio_en_path else None
+    import os
+    audio_url = f"/static/audio/{os.path.basename(s.audio_en_path)}" if s.audio_en_path else None
     return {"id": s.id, "content_id": s.content_id, "segment_index": s.segment_index,
             "title": s.title, "text_en": s.text_en, "summary_zh": s.summary_zh,
             "audio_url": audio_url, "preview_words_json": s.preview_words_json,
