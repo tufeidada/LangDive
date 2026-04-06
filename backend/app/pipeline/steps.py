@@ -2,8 +2,8 @@ import json
 import hashlib
 import logging
 import os
-from datetime import date, timedelta
-from sqlalchemy import select
+from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import select, func, and_
 
 from app.services.llm import call_llm
 from app.services.youtube import search_youtube, fetch_transcript, filter_videos
@@ -12,8 +12,15 @@ from app.services.segmenter import segment_content
 from app.services.annotator import annotate_vocabulary
 from app.services.tts import generate_segment_audio
 from app.services.cache import get_cached, set_cached
+from app.services.fetcher import (
+    fetch_youtube_channels,
+    fetch_blog_rss,
+    fetch_newsletter_links,
+    fetch_hn,
+    draw_classics,
+)
 from app.database import AsyncSessionLocal
-from app.models import Content, ContentSegment, SearchQueryLog
+from app.models import Content, ContentSegment, SearchQueryLog, ContentSource, ContentCandidate
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +31,391 @@ def content_hash(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Fetch candidates from YouTube + RSS
+# Step 0: Fetch candidates from all three layers
+# ---------------------------------------------------------------------------
+
+async def step0_fetch_all_layers() -> int:
+    """Fetch content from all 3 layers, store in content_candidate table, deduplicate.
+
+    Returns:
+        Number of new candidates inserted today.
+    """
+    today = date.today()
+    inserted_count = 0
+
+    async with AsyncSessionLocal() as session:
+        # Load active sources grouped by type
+        result = await session.execute(
+            select(ContentSource).where(ContentSource.is_active == True)  # noqa: E712
+        )
+        sources = result.scalars().all()
+
+        sources_by_type: dict[str, list] = {}
+        for src in sources:
+            src_dict = {
+                "id": src.id,
+                "name": src.name,
+                "type": src.type,
+                "url": src.url,
+                "extra_config": src.extra_config,
+                "layer": src.layer,
+                "priority": src.priority,
+                "default_difficulty": src.default_difficulty,
+                "tags": src.tags,
+            }
+            sources_by_type.setdefault(src.type, []).append(src_dict)
+
+        # Collect existing URLs from last 30 days for dedup
+        cutoff_30d = today - timedelta(days=30)
+        result = await session.execute(
+            select(ContentCandidate.url).where(ContentCandidate.date >= cutoff_30d)
+        )
+        recent_urls = {row[0] for row in result.fetchall()}
+
+        # --- Layer 1: Whitelist sources ---
+        all_raw_candidates: list[dict] = []
+
+        # YouTube channels
+        yt_sources = sources_by_type.get("youtube_channel", [])
+        if yt_sources:
+            try:
+                yt_candidates = await fetch_youtube_channels(yt_sources)
+                all_raw_candidates.extend(yt_candidates)
+            except Exception as e:
+                logger.error(f"Step 0: YouTube channel fetch failed: {e}")
+
+        # Blog RSS
+        blog_sources = sources_by_type.get("blog_rss", [])
+        if blog_sources:
+            try:
+                blog_candidates = await fetch_blog_rss(blog_sources)
+                all_raw_candidates.extend(blog_candidates)
+            except Exception as e:
+                logger.error(f"Step 0: Blog RSS fetch failed: {e}")
+
+        # Newsletter RSS (extract links)
+        newsletter_sources = sources_by_type.get("newsletter_rss", [])
+        if newsletter_sources:
+            try:
+                newsletter_candidates = await fetch_newsletter_links(newsletter_sources)
+                all_raw_candidates.extend(newsletter_candidates)
+            except Exception as e:
+                logger.error(f"Step 0: Newsletter fetch failed: {e}")
+
+        # Hacker News
+        hn_sources = sources_by_type.get("hn_api", [])
+        for hn_src in hn_sources:
+            try:
+                hn_candidates = await fetch_hn(hn_src)
+                all_raw_candidates.extend(hn_candidates)
+            except Exception as e:
+                logger.error(f"Step 0: HN fetch failed: {e}")
+
+        # Insert Layer 1 candidates (dedup against recent URLs)
+        for raw in all_raw_candidates:
+            url = raw.get("url", "")
+            if not url or url in recent_urls:
+                continue
+            recent_urls.add(url)
+
+            published_at = raw.get("published_at")
+            if published_at and isinstance(published_at, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    published_at = None
+
+            candidate = ContentCandidate(
+                title=raw.get("title", "Untitled"),
+                url=url,
+                source_id=raw.get("source_id"),
+                source_layer=1,
+                type=raw.get("type", "article"),
+                estimated_difficulty=raw.get("estimated_difficulty"),
+                thumbnail_url=raw.get("thumbnail_url"),
+                duration=raw.get("duration"),
+                published_at=published_at,
+                status="pending",
+                date=today,
+            )
+            session.add(candidate)
+            inserted_count += 1
+
+        # Update last_fetched for all active sources
+        now = datetime.now(timezone.utc)
+        for src in sources:
+            if src.type != "classic_library":
+                src.last_fetched = now
+
+        await session.flush()
+
+        # --- Layer 2: Classic library supplement ---
+        layer1_count = inserted_count
+        if layer1_count < 15:
+            needed = 15 - layer1_count
+            try:
+                classics = await draw_classics(session, needed)
+                for classic in classics:
+                    url = classic.get("url", "")
+                    if url in recent_urls:
+                        continue
+                    recent_urls.add(url)
+
+                    candidate = ContentCandidate(
+                        title=classic.get("title", "Untitled"),
+                        url=url,
+                        source_id=classic.get("source_id"),
+                        source_layer=2,
+                        type=classic.get("type", "article"),
+                        estimated_difficulty=classic.get("estimated_difficulty"),
+                        status="pending",
+                        date=today,
+                    )
+                    session.add(candidate)
+                    inserted_count += 1
+
+                    # Mark the original library item as used
+                    if classic.get("candidate_id"):
+                        orig = await session.get(ContentCandidate, classic["candidate_id"])
+                        if orig:
+                            orig.status = "library_used"
+            except Exception as e:
+                logger.error(f"Step 0: Classic library draw failed: {e}")
+
+        # --- Layer 3: Search fallback (emergency only) ---
+        total_so_far = inserted_count
+        if total_so_far < 10:
+            logger.info(f"Step 0: Only {total_so_far} candidates, activating Layer 3 search fallback")
+            try:
+                # Reuse existing search logic
+                fallback_candidates = await _layer3_search_fallback(session)
+                for raw in fallback_candidates:
+                    url = raw.get("url", "")
+                    if not url or url in recent_urls:
+                        continue
+                    recent_urls.add(url)
+
+                    candidate = ContentCandidate(
+                        title=raw.get("title", "Untitled"),
+                        url=url,
+                        source_layer=3,
+                        type=raw.get("type", "article"),
+                        estimated_difficulty=raw.get("estimated_difficulty"),
+                        status="pending",
+                        date=today,
+                    )
+                    session.add(candidate)
+                    inserted_count += 1
+            except Exception as e:
+                logger.error(f"Step 0: Layer 3 search fallback failed: {e}")
+
+        await session.commit()
+
+    logger.info(f"Step 0: inserted {inserted_count} candidates for {today}")
+    return inserted_count
+
+
+async def _layer3_search_fallback(session) -> list[dict]:
+    """Layer 3 emergency fallback: LLM-generated YouTube search + RSS."""
+    # Load recent queries to avoid repeats
+    cutoff = date.today() - timedelta(days=7)
+    result = await session.execute(
+        select(SearchQueryLog.query).where(SearchQueryLog.date >= cutoff)
+    )
+    recent_queries = [row[0] for row in result.fetchall()]
+    recent_str = json.dumps(recent_queries) if recent_queries else "[]"
+
+    system_prompt = (
+        "You are a content curator for an English learning platform targeting Chinese learners at B1-B2 level. "
+        "Generate YouTube search queries for high-quality interview and discussion videos."
+    )
+    user_prompt = (
+        f"Generate 4 YouTube search queries for English interview/discussion videos on AI, tech, finance, or management. "
+        f"Avoid repeating these recent queries: {recent_str}. "
+        f"Return ONLY a JSON array of strings."
+    )
+
+    queries_raw = await call_llm(system_prompt, user_prompt)
+    try:
+        queries = json.loads(queries_raw)
+        if not isinstance(queries, list):
+            raise ValueError
+    except (json.JSONDecodeError, ValueError):
+        queries = ["AI technology interview 2026", "finance podcast discussion"]
+
+    yt_results: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for query in queries:
+        try:
+            results = await search_youtube(query, max_results=5)
+            for item in results:
+                vid = item.get("video_id")
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    yt_results.append(item)
+
+            log_entry = SearchQueryLog(
+                query=query, source="youtube",
+                result_count=len(results), date=date.today(),
+            )
+            session.add(log_entry)
+        except Exception as e:
+            logger.warning(f"Layer 3 YouTube search failed for '{query}': {e}")
+
+    # Also pull RSS as fallback
+    rss_results = []
+    try:
+        rss_results = fetch_all_rss_candidates()
+    except Exception as e:
+        logger.warning(f"Layer 3 RSS fallback failed: {e}")
+
+    return yt_results + rss_results
+
+
+# ---------------------------------------------------------------------------
+# Step 1 (new): AI Ranking of candidates
+# ---------------------------------------------------------------------------
+
+async def step1_ai_ranking() -> list[dict]:
+    """LLM ranks today's candidates, selects top 5, updates content_candidate status.
+
+    Returns:
+        List of selected candidate dicts (for downstream processing).
+    """
+    today = date.today()
+
+    async with AsyncSessionLocal() as session:
+        # Get all pending candidates for today
+        result = await session.execute(
+            select(ContentCandidate).where(
+                and_(
+                    ContentCandidate.date == today,
+                    ContentCandidate.status.in_(["pending", "user_promoted", "user_submitted"]),
+                )
+            )
+        )
+        candidates = result.scalars().all()
+
+        if not candidates:
+            logger.warning("Step 1: No candidates to rank")
+            return []
+
+        # User-override items are always included
+        forced = [c for c in candidates if c.status in ("user_promoted", "user_submitted")]
+        pending = [c for c in candidates if c.status == "pending"]
+
+        # Build candidate list for LLM
+        candidate_lines = []
+        candidate_map = {c.id: c for c in candidates}
+        for c in candidates:
+            layer_label = f"L{c.source_layer}"
+            candidate_lines.append(
+                f"[{c.id}] [{c.type or 'article'}] [{layer_label}] {c.title}"
+            )
+
+        candidate_list_str = "\n".join(candidate_lines)
+        forced_ids = {c.id for c in forced}
+        forced_note = ""
+        if forced_ids:
+            forced_note = f"\nIMPORTANT: Items with IDs {list(forced_ids)} are user-selected and MUST be included.\n"
+
+        system_prompt = (
+            "You are selecting today's English learning content for a Chinese learner.\n"
+            "Learner profile: IELTS B1-B2, interests in AI/finance/tech/management."
+        )
+        user_prompt = (
+            f"Candidates (one per line, format: [ID] [TYPE] [LAYER] [TITLE]):\n"
+            f"{candidate_list_str}\n\n"
+            f"{forced_note}"
+            f"Select exactly 5 items following these rules:\n"
+            f"- 1-2 videos + 3-4 articles (hard constraint)\n"
+            f"- Prioritize Layer 1 over Layer 2, Layer 2 over Layer 3\n"
+            f"- Prefer diverse sources (don't pick 3 from same source)\n"
+            f"- Prefer difficulty B1-B2 (allow 1 item at C1 for challenge)\n"
+            f"- Prefer content published in last 7 days (except classics)\n\n"
+            f"For each candidate, provide:\n"
+            f"- id: the candidate ID\n"
+            f"- score: 0-1 (relevance * quality * difficulty_match)\n"
+            f"- selected: true/false\n"
+            f"- reason: one sentence explanation\n\n"
+            f"Return ONLY a JSON array sorted by score DESC."
+        )
+
+        ranked_raw = await call_llm(system_prompt, user_prompt)
+        try:
+            content = ranked_raw.strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+            ranked: list[dict] = json.loads(content)
+            if not isinstance(ranked, list):
+                raise ValueError("Expected JSON array")
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Step 1: Failed to parse LLM ranking, falling back to priority order")
+            # Fallback: sort by source priority, pick top 5
+            ranked = [{"id": c.id, "score": 0.5, "selected": i < 5, "reason": "fallback"}
+                      for i, c in enumerate(sorted(pending, key=lambda x: x.source_layer))]
+
+        # Determine selected IDs
+        selected_ids = set(forced_ids)  # always include forced
+        for item in ranked:
+            if item.get("selected") and item.get("id") in candidate_map:
+                selected_ids.add(item["id"])
+
+        # Enforce max 5
+        selected_ids_list = list(selected_ids)[:5]
+        selected_ids = set(selected_ids_list)
+
+        # Enforce 1-2 videos max
+        selected_objs = [candidate_map[cid] for cid in selected_ids if cid in candidate_map]
+        videos = [c for c in selected_objs if c.type == "video"]
+        articles = [c for c in selected_objs if c.type != "video"]
+        if len(videos) > 2:
+            videos = videos[:2]
+            selected_objs = (videos + articles)[:5]
+            selected_ids = {c.id for c in selected_objs}
+
+        # Update statuses and scores
+        score_map = {item.get("id"): item for item in ranked if isinstance(item.get("id"), int)}
+        for c in candidates:
+            rank_info = score_map.get(c.id, {})
+            c.ai_score = rank_info.get("score")
+            c.ai_reason = rank_info.get("reason")
+
+            if c.id in selected_ids:
+                if c.status not in ("user_promoted", "user_submitted"):
+                    c.status = "selected"
+            else:
+                if c.status == "pending":
+                    c.status = "rejected"
+
+        await session.commit()
+
+        # Build output dicts for pipeline processing
+        selected_dicts = []
+        for c in candidates:
+            if c.id not in selected_ids:
+                continue
+            selected_dicts.append({
+                "candidate_id": c.id,
+                "title": c.title,
+                "url": c.url,
+                "type": c.type or "article",
+                "source": "",
+                "difficulty": c.estimated_difficulty,
+                "video_id": _extract_video_id(c.url) if c.type == "video" else None,
+                "duration": c.duration,
+            })
+
+    logger.info(
+        f"Step 1: ranked {len(candidates)} candidates, selected {len(selected_dicts)} "
+        f"({sum(1 for d in selected_dicts if d['type'] == 'video')} videos)"
+    )
+    return selected_dicts
+
+
+# ---------------------------------------------------------------------------
+# Step 1 (old): Fetch candidates from YouTube + RSS — kept for backward compat
 # ---------------------------------------------------------------------------
 
 async def step1_fetch_candidates() -> list[dict]:
@@ -514,6 +905,14 @@ async def step9_store(items: list[dict]) -> None:
                     words_json=seg.get("words"),
                 )
                 session.add(seg_obj)
+
+            # Link back to content_candidate if this came from the new pipeline
+            candidate_id = item.get("candidate_id")
+            if candidate_id:
+                candidate = await session.get(ContentCandidate, candidate_id)
+                if candidate:
+                    candidate.content_id = content_obj.id
+                    candidate.content_hash = c_hash
 
         await session.commit()
 
