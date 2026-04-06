@@ -1,5 +1,5 @@
 // src/pages/ContentDetail.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { getContent, getSegments } from '../services/api'
@@ -8,9 +8,9 @@ import SegmentList from '../components/SegmentList'
 import PreviewScreen from '../components/PreviewScreen'
 import ArticleReader from '../components/ArticleReader'
 import VideoPlayer from '../components/VideoPlayer'
-import type { ContentDetail as ContentDetailType, Segment } from '../types'
+import type { ContentDetail as ContentDetailType, Segment, VocabWord } from '../types'
 
-type Phase = 'segments' | 'preview' | 'reading'
+type Phase = 'full' | 'segments' | 'preview' | 'segment-reading'
 
 export default function ContentDetail() {
   const { id } = useParams<{ id: string }>()
@@ -18,7 +18,7 @@ export default function ContentDetail() {
   const [content, setContent] = useState<ContentDetailType | null>(null)
   const [segments, setSegments] = useState<Segment[]>([])
   const [activeSegment, setActiveSegment] = useState<Segment | null>(null)
-  const [phase, setPhase] = useState<Phase>('segments')
+  const [phase, setPhase] = useState<Phase>('full')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -29,30 +29,70 @@ export default function ContentDetail() {
         setContent(c)
         setSegments(s)
         log('content_open', { content_id: numId })
-        // If single segment, go directly to preview
-        if (s.length === 1) {
-          setActiveSegment(s[0])
-          setPhase(s[0].preview_words_json?.length ? 'preview' : 'reading')
+        // Videos don't have a "full" article view — go to segments
+        if (c.type === 'video') {
+          if (s.length === 1) {
+            setActiveSegment(s[0])
+            setPhase(s[0].preview_words_json?.length ? 'preview' : 'segment-reading')
+          } else {
+            setPhase('segments')
+          }
         }
+        // Articles default to 'full' (already set)
       })
       .finally(() => setLoading(false))
   }, [id])
 
+  // Merge all segments into one for full-article view
+  const fullArticleText = useMemo(() => {
+    if (!segments.length) return ''
+    return segments.map(s => s.text_en).join('\n\n')
+  }, [segments])
+
+  const fullArticleWords = useMemo((): VocabWord[] => {
+    const seen = new Set<string>()
+    const merged: VocabWord[] = []
+    for (const seg of segments) {
+      if (seg.words_json) {
+        for (const w of seg.words_json) {
+          if (!seen.has(w.word.toLowerCase())) {
+            seen.add(w.word.toLowerCase())
+            merged.push(w)
+          }
+        }
+      }
+    }
+    return merged
+  }, [segments])
+
+  // A synthetic segment used by ArticleReader in full mode (only needs segment_index + is_completed)
+  const fullModeSyntheticSegment = useMemo((): Segment | null => {
+    if (!segments.length) return null
+    return {
+      ...segments[0],
+      text_en: fullArticleText,
+      words_json: fullArticleWords,
+      audio_url: null,
+    }
+  }, [segments, fullArticleText, fullArticleWords])
+
   const handleSelectSegment = (seg: Segment) => {
     setActiveSegment(seg)
-    setPhase(seg.preview_words_json?.length ? 'preview' : 'reading')
+    setPhase(seg.preview_words_json?.length ? 'preview' : 'segment-reading')
     log('segment_start', { content_id: content?.id, segment_index: seg.segment_index })
   }
 
   const handleStartReading = () => {
-    setPhase('reading')
+    setPhase('segment-reading')
   }
 
   const handleBack = () => {
-    if (phase === 'reading') {
-      setPhase(segments.length > 1 ? 'segments' : 'preview')
+    if (phase === 'segment-reading') {
+      setPhase('preview')
     } else if (phase === 'preview') {
       setPhase('segments')
+    } else if (phase === 'segments') {
+      setPhase('full')
     }
   }
 
@@ -80,24 +120,76 @@ export default function ContentDetail() {
     )
   }
 
+  const isAtRoot = phase === 'full' || (content.type === 'video' && phase === 'segments')
+
   return (
     <div>
-      <button onClick={phase === 'segments' ? undefined : handleBack} className="text-text-secondary hover:text-accent flex items-center gap-1 mb-4">
-        {phase === 'segments' ? (
-          <Link to="/" className="flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Back</Link>
+      {/* Back navigation */}
+      <div className="mb-4">
+        {isAtRoot ? (
+          <Link to="/" className="text-text-secondary hover:text-accent flex items-center gap-1">
+            <ArrowLeft className="w-4 h-4" /> Back
+          </Link>
         ) : (
-          <><ArrowLeft className="w-4 h-4" /> Back</>
+          <button onClick={handleBack} className="text-text-secondary hover:text-accent flex items-center gap-1">
+            <ArrowLeft className="w-4 h-4" /> Back
+          </button>
         )}
-      </button>
+      </div>
 
       <h1 className="text-text-primary font-bold text-lg mb-1">{content.title}</h1>
       <div className="text-text-secondary text-sm mb-4">{content.source} {content.difficulty && `· ${content.difficulty}`}</div>
       {content.summary_zh && <p className="text-text-secondary text-sm mb-4 italic">{content.summary_zh}</p>}
 
-      {phase === 'segments' && segments.length > 1 && (
+      {/* Full article view (default for articles) */}
+      {phase === 'full' && fullModeSyntheticSegment && (
+        <div>
+          {/* Mode switcher buttons */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setPhase('segments')}
+              className="text-sm px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:border-accent hover:text-accent transition-colors"
+            >
+              Segment Mode
+            </button>
+            {(() => {
+              // Collect all preview words across segments
+              const allPreviewWords = segments.flatMap(s => s.preview_words_json ?? [])
+              if (!allPreviewWords.length) return null
+              return (
+                <button
+                  onClick={() => {
+                    // Use first segment with preview words as vehicle
+                    const segWithPreview = segments.find(s => s.preview_words_json?.length)
+                    if (segWithPreview) {
+                      setActiveSegment(segWithPreview)
+                      setPhase('preview')
+                    }
+                  }}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:border-accent hover:text-accent transition-colors"
+                >
+                  Preview Words
+                </button>
+              )
+            })()}
+          </div>
+
+          <ArticleReader
+            segment={fullModeSyntheticSegment}
+            contentId={content.id}
+            overrideTextEn={fullArticleText}
+            overrideWordsJson={fullArticleWords}
+            hideComplete
+          />
+        </div>
+      )}
+
+      {/* Segment list */}
+      {phase === 'segments' && (
         <SegmentList segments={segments} onSelect={handleSelectSegment} />
       )}
 
+      {/* Preview screen */}
       {phase === 'preview' && activeSegment?.preview_words_json && (
         <PreviewScreen
           words={activeSegment.preview_words_json}
@@ -106,7 +198,8 @@ export default function ContentDetail() {
         />
       )}
 
-      {phase === 'reading' && activeSegment && (
+      {/* Segment reading */}
+      {phase === 'segment-reading' && activeSegment && (
         content.type === 'video' ? (
           <VideoPlayer content={content} segment={activeSegment} />
         ) : (

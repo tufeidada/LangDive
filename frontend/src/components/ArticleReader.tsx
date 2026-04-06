@@ -10,33 +10,75 @@ import AddWordModal from './AddWordModal'
 import type { Segment, VocabWord } from '../types'
 import { LEVEL_COLORS } from '../types'
 
+type DensityLevel = 'few' | 'medium' | 'all'
+
+const DENSITY_THRESHOLD: Record<DensityLevel, number> = {
+  few: 0.8,
+  medium: 0.5,
+  all: 0.0,
+}
+
+const DENSITY_LABELS: Record<DensityLevel, string> = {
+  few: '少',
+  medium: '中',
+  all: '多',
+}
+
 interface Props {
   segment: Segment
   contentId: number
+  // Optional overrides for full-article mode
+  overrideTextEn?: string
+  overrideWordsJson?: VocabWord[]
+  // Hide complete button in full-article mode
+  hideComplete?: boolean
 }
 
-export default function ArticleReader({ segment, contentId }: Props) {
+export default function ArticleReader({
+  segment,
+  contentId,
+  overrideTextEn,
+  overrideWordsJson,
+  hideComplete,
+}: Props) {
   const { log } = useEventLogger()
   const [expanded, setExpanded] = useState(false)
+  const [density, setDensity] = useState<DensityLevel>('medium')
   const [popupWord, setPopupWord] = useState<{ word: VocabWord; pos: { x: number; y: number } } | null>(null)
   const [completed, setCompleted] = useState(segment.is_completed)
   const [addWordModal, setAddWordModal] = useState<{ word: string; context: string } | null>(null)
 
-  // Build word lookup map
+  const textEn = overrideTextEn ?? segment.text_en
+  const rawWords = overrideWordsJson ?? segment.words_json
+
+  // Build word lookup map filtered by density
   const wordMap = useMemo(() => {
     const map = new Map<string, VocabWord>()
-    if (segment.words_json) {
-      for (const w of segment.words_json) {
+    if (rawWords) {
+      const threshold = DENSITY_THRESHOLD[density]
+      for (const w of rawWords) {
+        if ((w.importance_score ?? 0) >= threshold) {
+          map.set(w.word.toLowerCase(), w)
+        }
+      }
+    }
+    return map
+  }, [rawWords, density])
+
+  // Full unfiltered word map for double-click "already annotated" check
+  const fullWordMap = useMemo(() => {
+    const map = new Map<string, VocabWord>()
+    if (rawWords) {
+      for (const w of rawWords) {
         map.set(w.word.toLowerCase(), w)
       }
     }
     return map
-  }, [segment.words_json])
+  }, [rawWords])
 
   // Annotate text: split into tokens, mark annotated words
   const annotatedContent = useMemo(() => {
-    const text = segment.text_en
-    const tokens = text.split(/(\s+)/)
+    const tokens = textEn.split(/(\s+)/)
     return tokens.map((token, i) => {
       const clean = token.replace(/[^a-zA-Z'-]/g, '').toLowerCase()
       const wordData = wordMap.get(clean)
@@ -45,7 +87,7 @@ export default function ArticleReader({ segment, contentId }: Props) {
       }
       return { key: i, text: token, word: null, isWord: false }
     })
-  }, [segment.text_en, wordMap])
+  }, [textEn, wordMap])
 
   const handleWordClick = (word: VocabWord, e: React.MouseEvent) => {
     log('word_lookup', { word: word.word })
@@ -56,14 +98,13 @@ export default function ArticleReader({ segment, contentId }: Props) {
     const selection = window.getSelection()?.toString().trim()
     if (!selection) return
     if (selection.includes(' ') || selection.length < 2 || selection.length > 30) return
-    if (wordMap.has(selection.toLowerCase())) return
+    if (fullWordMap.has(selection.toLowerCase())) return
     // Find context sentence
-    const text = segment.text_en
-    const sentences = text.split(/[.!?]+/)
+    const sentences = textEn.split(/[.!?]+/)
     const contextSentence = sentences.find(s => s.toLowerCase().includes(selection.toLowerCase()))?.trim() || ''
     setAddWordModal({ word: selection, context: contextSentence })
     log('word_custom_add', { word: selection })
-  }, [wordMap, segment.text_en, log])
+  }, [fullWordMap, textEn, log])
 
   const handleComplete = async () => {
     await markSegmentComplete(contentId, segment.segment_index)
@@ -82,6 +123,24 @@ export default function ArticleReader({ segment, contentId }: Props) {
           {expanded ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           {expanded ? 'Collapse' : 'Expand'} annotations
         </button>
+
+        {/* Density toggle */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-text-secondary mr-1">注释密度</span>
+          {(['few', 'medium', 'all'] as DensityLevel[]).map(level => (
+            <button
+              key={level}
+              onClick={() => setDensity(level)}
+              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                density === level
+                  ? 'bg-accent text-primary border-accent'
+                  : 'text-text-secondary border-border hover:border-accent hover:text-accent'
+              }`}
+            >
+              {DENSITY_LABELS[level]}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Audio player */}
@@ -110,12 +169,12 @@ export default function ArticleReader({ segment, contentId }: Props) {
       </div>
 
       {/* Glossary */}
-      {segment.words_json && segment.words_json.length > 0 && (
-        <GlossarySection words={segment.words_json} />
+      {rawWords && rawWords.length > 0 && (
+        <GlossarySection words={rawWords} />
       )}
 
       {/* Complete button */}
-      {!completed && (
+      {!hideComplete && !completed && (
         <button
           onClick={handleComplete}
           className="w-full mt-6 bg-accent text-primary font-medium py-3 rounded-lg"
@@ -123,7 +182,7 @@ export default function ArticleReader({ segment, contentId }: Props) {
           Mark as completed
         </button>
       )}
-      {completed && (
+      {!hideComplete && completed && (
         <div className="mt-6 text-center text-status-mastered text-sm">Segment completed!</div>
       )}
 
