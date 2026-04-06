@@ -84,6 +84,10 @@ async def generate_segment_audio(text: str, output_path: str) -> str:
         if audio_bytes:
             all_audio += audio_bytes
 
+    if not all_audio:
+        logger.error(f"No audio generated for {output_path}")
+        return output_path
+
     with open(output_path, "wb") as f:
         f.write(all_audio)
 

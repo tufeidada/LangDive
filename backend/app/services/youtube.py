@@ -42,15 +42,29 @@ async def search_youtube(query: str, max_results: int = 5) -> list[dict]:
         if item.get("id", {}).get("videoId")
     ]
 
-def fetch_transcript(video_id: str, languages: list[str] | None = None) -> list[dict] | None:
-    if languages is None:
-        languages = ["en"]
+def fetch_transcript(video_id: str) -> list[dict] | None:
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
-        return [
-            {"text": entry["text"], "start": entry["start"], "duration": entry["duration"]}
-            for entry in transcript
-        ]
+        # Try English first, then en-US, then any available with English translation
+        for langs in [["en"], ["en-US"], ["en-GB"]]:
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
+                return [
+                    {"text": entry["text"], "start": entry["start"], "duration": entry["duration"]}
+                    for entry in transcript
+                ]
+            except Exception:
+                continue
+        # Try auto-generated English
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        for t in transcript_list:
+            if t.language_code.startswith("en"):
+                entries = t.fetch()
+                return [
+                    {"text": e["text"], "start": e["start"], "duration": e["duration"]}
+                    for e in entries
+                ]
+        logger.warning(f"No English transcript for {video_id}")
+        return None
     except Exception as e:
         logger.warning(f"No transcript for {video_id}: {e}")
         return None

@@ -245,7 +245,7 @@ Given an English article/transcript, do ALL THREE tasks in ONE response:
    - Articles over 3000 words: 5-8 segments
    - Do NOT over-split. Each segment should be a substantial, coherent section.
 
-2. **Annotate**: For each segment, identify 15-30 unfamiliar vocabulary words (be generous — include all words above CET-4 level). Set importance_score 0.0-1.0 for each word. This allows the UI to show fewer or more words based on user preference.
+2. **Annotate**: For each segment, identify ALL unfamiliar vocabulary words (typically 15-40 per segment). Be GENEROUS — include every word above basic CET-4 level. Set importance_score 0.0-1.0 for each. The UI filters by importance_score, so more words = better. DO NOT limit to only 5 words per segment.
 
 3. **Summarize**: Chinese summary for the full content (2-3 sentences) and each segment (1 sentence).
 
@@ -349,6 +349,11 @@ async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:
             for i, seg in enumerate(segments):
                 seg["segment_index"] = i
                 words = seg.get("words", [])
+                # Ensure every word has a level field
+                for w in words:
+                    if "level" not in w:
+                        score = w.get("importance_score", 0.5)
+                        w["level"] = "Advanced" if score >= 0.8 else "IELTS" if score >= 0.5 else "CET-6"
                 preview = sorted(words, key=lambda w: w.get("importance_score", 0), reverse=True)[:5]
                 seg["preview_words"] = preview
                 all_words.extend(words)
