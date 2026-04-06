@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str = ""
     AUDIO_DIR: str = "./data/audio"
     DAILY_PIPELINE_HOUR: int = 6
+    HTTP_PROXY: str = ""
+    HTTPS_PROXY: str = ""
 
     class Config:
         env_file = ".env"

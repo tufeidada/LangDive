@@ -1,8 +1,16 @@
+import os
 import feedparser
 import trafilatura
 import logging
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Set proxy env vars so trafilatura/feedparser/urllib pick them up
+if settings.HTTP_PROXY:
+    os.environ["HTTP_PROXY"] = settings.HTTP_PROXY
+if settings.HTTPS_PROXY:
+    os.environ["HTTPS_PROXY"] = settings.HTTPS_PROXY
 
 RSS_SOURCES = [
     {"name": "TechCrunch", "url": "https://feeds.feedburner.com/TechCrunch"},
@@ -38,10 +46,14 @@ def fetch_all_rss_candidates() -> list[dict]:
 
 def extract_article_text(url: str) -> str | None:
     try:
-        downloaded = trafilatura.fetch_url(url)
-        if downloaded is None:
+        # Use urllib with proxy support instead of trafilatura.fetch_url
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+        if not html:
             return None
-        return trafilatura.extract(downloaded)
+        return trafilatura.extract(html)
     except Exception as e:
         logger.error(f"Article extraction failed for {url}: {e}")
         return None
