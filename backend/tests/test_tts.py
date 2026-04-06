@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from app.services.tts import generate_segment_audio
 
 
@@ -10,7 +10,7 @@ async def test_generate_audio_google_success(tmp_path):
     mock_response.audio_content = b"fake-mp3-data"
     mock_client.synthesize_speech.return_value = mock_response
 
-    with patch("app.services.tts.texttospeech.TextToSpeechClient", return_value=mock_client):
+    with patch("app.services.tts._google_synthesize", return_value=b"fake-mp3-data"):
         output_path = str(tmp_path / "test_audio.mp3")
         result = await generate_segment_audio("Hello world.", output_path)
         assert result == output_path
@@ -20,11 +20,8 @@ async def test_generate_audio_google_success(tmp_path):
 
 @pytest.mark.asyncio
 async def test_generate_audio_google_fails_falls_back_to_qwen(tmp_path):
-    mock_client = MagicMock()
-    mock_client.synthesize_speech.side_effect = Exception("Google TTS error")
-
-    with patch("app.services.tts.texttospeech.TextToSpeechClient", return_value=mock_client):
-        with patch("app.services.tts._call_qwen_tts", new_callable=AsyncMock, return_value=b"fake-qwen-mp3"):
+    with patch("app.services.tts._google_synthesize", side_effect=Exception("Google TTS error")):
+        with patch("app.services.tts._qwen_synthesize", return_value=b"fake-qwen-mp3"):
             output_path = str(tmp_path / "test_audio.mp3")
             result = await generate_segment_audio("Hello world.", output_path)
             assert result == output_path

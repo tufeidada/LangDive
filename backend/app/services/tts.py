@@ -1,13 +1,12 @@
 import logging
-import httpx
 import asyncio
-from google.cloud import texttospeech
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 def _google_synthesize(text: str) -> bytes:
+    from google.cloud import texttospeech
     client = texttospeech.TextToSpeechClient()
     synthesis_input = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
@@ -24,18 +23,20 @@ def _google_synthesize(text: str) -> bytes:
     return response.audio_content
 
 
-async def _call_qwen_tts(text: str) -> bytes:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            "https://dashscope.aliyuncs.com/api/v1/services/tts/text-to-speech",
-            headers={"Authorization": f"Bearer {settings.DASHSCOPE_API_KEY}"},
-            json={
-                "model": "qwen-tts-2025-05-22",
-                "input": {"text": text},
-            },
-        )
-        resp.raise_for_status()
-        return resp.content
+def _qwen_synthesize(text: str) -> bytes:
+    import dashscope
+    import urllib.request
+    resp = dashscope.audio.qwen_tts.SpeechSynthesizer.call(
+        model="qwen3-tts-flash",
+        api_key=settings.DASHSCOPE_API_KEY,
+        text=text,
+        voice="Cherry",
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Qwen TTS failed: {resp.code} {resp.message}")
+    audio_url = resp["output"]["audio"]["url"]
+    with urllib.request.urlopen(audio_url) as r:
+        return r.read()
 
 
 async def generate_segment_audio(text: str, output_path: str) -> str:
@@ -54,10 +55,12 @@ async def generate_segment_audio(text: str, output_path: str) -> str:
         except Exception as e:
             logger.warning(f"Google TTS failed, falling back to Qwen: {e}")
 
-        # Fallback to Qwen
+        # Fallback to Qwen (DashScope SDK)
         if audio_bytes is None:
             try:
-                audio_bytes = await _call_qwen_tts(para)
+                audio_bytes = await asyncio.get_event_loop().run_in_executor(
+                    None, _qwen_synthesize, para
+                )
             except Exception as e:
                 logger.error(f"Qwen TTS also failed: {e}")
                 continue
