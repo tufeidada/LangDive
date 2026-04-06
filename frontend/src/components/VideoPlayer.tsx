@@ -1,11 +1,11 @@
 // src/components/VideoPlayer.tsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Languages } from 'lucide-react'
 import { useEventLogger } from '../hooks/useEventLogger'
 import SubtitlePanel from './SubtitlePanel'
 import AudioPlayer from './AudioPlayer'
 import GlossarySection from './GlossarySection'
-import { markSegmentComplete } from '../services/api'
+import { markSegmentComplete, getTranscript } from '../services/api'
 import type { ContentDetail, Segment } from '../types'
 
 interface Props {
@@ -18,9 +18,37 @@ export default function VideoPlayer({ content, segment }: Props) {
   const [showChinese, setShowChinese] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [completed, setCompleted] = useState(segment.is_completed)
+  const [subtitles, setSubtitles] = useState<{ text: string; start: number; duration: number }[]>([])
 
   // Extract video ID from URL
   const videoId = content.url?.match(/v=([^&]+)/)?.[1] || ''
+
+  // Fetch real transcript on mount
+  useEffect(() => {
+    getTranscript(content.id)
+      .then(entries => {
+        if (entries && entries.length > 0) {
+          setSubtitles(entries)
+        } else {
+          // Fallback: split segment text into pseudo-subtitles with fake timing
+          const fallback = segment.text_en.split(/[.!?]+/).filter(s => s.trim()).map((text, i) => ({
+            text: text.trim(),
+            start: i * 5,
+            duration: 5,
+          }))
+          setSubtitles(fallback)
+        }
+      })
+      .catch(() => {
+        // On error, fall back to fake subtitles
+        const fallback = segment.text_en.split(/[.!?]+/).filter(s => s.trim()).map((text, i) => ({
+          text: text.trim(),
+          start: i * 5,
+          duration: 5,
+        }))
+        setSubtitles(fallback)
+      })
+  }, [content.id, segment.text_en])
 
   const handleToggleChinese = () => {
     setShowChinese(!showChinese)
@@ -37,14 +65,6 @@ export default function VideoPlayer({ content, segment }: Props) {
     setCompleted(true)
     log('segment_complete', { content_id: content.id, segment_index: segment.segment_index })
   }
-
-  // Build subtitle list from segment words/text
-  // In real implementation, this would come from the transcript data
-  const subtitles = segment.text_en.split(/[.!?]+/).filter(s => s.trim()).map((text, i) => ({
-    text: text.trim(),
-    start: i * 5, // placeholder timing
-    duration: 5,
-  }))
 
   return (
     <div>

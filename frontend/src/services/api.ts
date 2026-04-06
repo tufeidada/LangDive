@@ -19,6 +19,8 @@ export const getSegments = (id: number) => fetchJSON<Segment[]>(`/content/${id}/
 export const getSegment = (id: number, idx: number) => fetchJSON<Segment>(`/content/${id}/segments/${idx}`)
 export const markSegmentComplete = (id: number, idx: number) =>
   fetchJSON(`/content/${id}/segments/${idx}/complete`, { method: 'POST' })
+export const getTranscript = (id: number) =>
+  fetchJSON<{ text: string; start: number; duration: number }[]>(`/content/${id}/transcript`)
 
 // Vocabulary
 export const getVocab = () => fetchJSON<VocabEntry[]>('/vocab')

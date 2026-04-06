@@ -473,13 +473,18 @@ async def step9_store(items: list[dict]) -> None:
             if difficulty not in allowed_difficulties:
                 difficulty = "B1"  # default
 
+            # For video content, store raw transcript in tags field for the transcript API endpoint
+            tags = item.get("tags")
+            if content_type == "video" and item.get("transcript_raw"):
+                tags = item["transcript_raw"]
+
             content_obj = Content(
                 type=content_type,
                 title=title,
                 source=source,
                 url=url,
                 difficulty=difficulty,
-                tags=item.get("tags"),
+                tags=tags,
                 content_text=text or None,
                 summary_zh=item.get("summary_zh"),
                 audio_path=None,

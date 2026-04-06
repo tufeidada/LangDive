@@ -1,7 +1,7 @@
 // src/components/ArticleReader.tsx
-import { useState, useCallback, useMemo, useRef } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { Eye, EyeOff, Play, Pause, Download } from 'lucide-react'
-import { markSegmentComplete } from '../services/api'
+import { markSegmentComplete, getVocab } from '../services/api'
 import { useEventLogger } from '../hooks/useEventLogger'
 import WordPopup from './WordPopup'
 import GlossarySection from './GlossarySection'
@@ -102,6 +102,15 @@ export default function ArticleReader({
   const [popupWord, setPopupWord] = useState<{ word: VocabWord; pos: { x: number; y: number } } | null>(null)
   const [completed, setCompleted] = useState(segment.is_completed)
   const [addWordModal, setAddWordModal] = useState<{ word: string; context: string } | null>(null)
+  const [userVocab, setUserVocab] = useState<Map<string, string>>(new Map())
+
+  useEffect(() => {
+    getVocab().then(list => {
+      const map = new Map<string, string>()
+      for (const v of list) map.set(v.word.toLowerCase(), v.status)
+      setUserVocab(map)
+    }).catch(() => {/* ignore vocab fetch errors */})
+  }, [])
 
   const contentRef = useRef<HTMLDivElement>(null)
   const textEn = overrideTextEn ?? segment.text_en
@@ -122,19 +131,21 @@ export default function ArticleReader({
       .save()
   }
 
-  // Build word lookup map filtered by density
+  // Build word lookup map filtered by density and user vocab status
   const wordMap = useMemo(() => {
     const map = new Map<string, VocabWord>()
     if (rawWords) {
       const threshold = DENSITY_THRESHOLD[density]
       for (const w of rawWords) {
-        if ((w.importance_score ?? 0) >= threshold) {
-          map.set(w.word.toLowerCase(), w)
-        }
+        if ((w.importance_score ?? 0) < threshold) continue
+        // Skip words user has marked as known or ignored
+        const status = userVocab.get(w.word.toLowerCase())
+        if (status === 'known' || status === 'ignored') continue
+        map.set(w.word.toLowerCase(), w)
       }
     }
     return map
-  }, [rawWords, density])
+  }, [rawWords, density, userVocab])
 
   // Full unfiltered word map for double-click "already annotated" check
   const fullWordMap = useMemo(() => {

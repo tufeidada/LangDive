@@ -70,6 +70,22 @@ async def get_content_detail(content_id: int, db: AsyncSession = Depends(get_db)
     }
 
 
+@router.get("/content/{content_id}/transcript")
+async def get_transcript(content_id: int, db: AsyncSession = Depends(get_db)):
+    """Return raw transcript entries for video content. Stored in content.tags."""
+    stmt = select(Content).where(Content.id == content_id)
+    result = await db.execute(stmt)
+    c = result.scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Content not found")
+    # tags holds transcript list for videos: [{text, start, duration}, ...]
+    if c.type != "video" or not c.tags:
+        return []
+    if isinstance(c.tags, list):
+        return c.tags
+    return []
+
+
 @router.get("/content/{content_id}/segments")
 async def get_segments(content_id: int, db: AsyncSession = Depends(get_db)):
     stmt = select(ContentSegment).where(ContentSegment.content_id == content_id).order_by(ContentSegment.segment_index)
