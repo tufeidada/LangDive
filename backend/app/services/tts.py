@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 def _get_google_access_token() -> str:
     """Get OAuth2 access token from service account JSON."""
+    import os
+    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", settings.GOOGLE_APPLICATION_CREDENTIALS)
     import google.auth
     import google.auth.transport.requests
     credentials, _ = google.auth.default(
