@@ -6,6 +6,8 @@ node_modules/
 __pycache__/
 backend/data/audio/*.mp3
 backend/data/audio/*.wav
+backend/data/stardict.csv
+backend/data/ecdict.zip
 frontend/dist/
 *.pyc
 .DS_Store

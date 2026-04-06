@@ -108,6 +108,21 @@ async def review_word(word: str, req: ReviewRequest, db: AsyncSession = Depends(
 
 @router.post("/vocab/ai-lookup")
 async def ai_lookup(req: AILookupRequest, db: AsyncSession = Depends(get_db)):
+    # Try local ECDICT dictionary first (no API cost), unless context is provided
+    if not req.context_sentence:
+        from app.services.dictionary import lookup_word, get_word_level
+        entry = lookup_word(req.word)
+        if entry and entry.get('translation'):
+            return {
+                "word": req.word,
+                "ipa": entry.get('phonetic', ''),
+                "meaning_zh": entry['translation'].split('\\n')[0],  # first line only
+                "detail_zh": entry.get('definition', ''),
+                "example_en": "",
+                "example_zh": "",
+                "level": get_word_level(req.word) or "CET-6",
+            }
+    # Fallback to LLM if not found in dictionary or if context sentence is provided
     result = await annotate_custom_word(req.word, req.context_sentence or "")
     if result is None:
         raise HTTPException(status_code=500, detail="AI lookup failed")

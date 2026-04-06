@@ -11,14 +11,24 @@ def load_cet4_set() -> set[str]:
     global _cet4_set
     if _cet4_set is not None:
         return _cet4_set
+    # Start with the local txt word list
     path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "cet4_words.txt")
     path = os.path.normpath(path)
     try:
         with open(path, "r") as f:
-            _cet4_set = {line.strip().lower() for line in f if line.strip()}
+            txt_words = {line.strip().lower() for line in f if line.strip()}
     except FileNotFoundError:
-        logger.warning("CET-4 word list not found, using empty set")
-        _cet4_set = set()
+        logger.warning("CET-4 word list not found, falling back to ECDICT only")
+        txt_words = set()
+    # Merge with ECDICT tag-based CET-4 words for broader coverage
+    try:
+        from app.services.dictionary import get_cet4_words_from_ecdict
+        ecdict_cet4 = get_cet4_words_from_ecdict()
+        _cet4_set = txt_words | ecdict_cet4
+        logger.info(f"CET-4 set: {len(txt_words)} from txt + {len(ecdict_cet4)} from ECDICT = {len(_cet4_set)} total")
+    except Exception as e:
+        logger.warning(f"Could not load ECDICT CET-4 words: {e}")
+        _cet4_set = txt_words
     return _cet4_set
 
 ANNOTATE_SYSTEM = """You are an English vocabulary annotator for a Chinese learner at B1-B2 level
