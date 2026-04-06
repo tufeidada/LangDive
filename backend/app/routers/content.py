@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date
+from datetime import date, timedelta
 from app.database import get_db
 from app.models import Content, ContentSegment
 
@@ -10,9 +10,16 @@ router = APIRouter()
 
 @router.get("/content/today")
 async def get_today_content(db: AsyncSession = Depends(get_db)):
+    """Get latest content. If nothing today, fall back to yesterday."""
     stmt = select(Content).where(Content.date == date.today()).order_by(Content.id)
     result = await db.execute(stmt)
     items = result.scalars().all()
+    # Fallback: if no content today, show yesterday's
+    if not items:
+        yesterday = date.today() - timedelta(days=1)
+        stmt = select(Content).where(Content.date == yesterday).order_by(Content.id)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
     return [
         {
             "id": c.id, "type": c.type, "title": c.title, "source": c.source,

@@ -1,6 +1,6 @@
 // src/components/ArticleReader.tsx
-import { useState, useCallback, useMemo } from 'react'
-import { Eye, EyeOff, Play, Pause } from 'lucide-react'
+import { useState, useCallback, useMemo, useRef } from 'react'
+import { Eye, EyeOff, Play, Pause, Download } from 'lucide-react'
 import { markSegmentComplete } from '../services/api'
 import { useEventLogger } from '../hooks/useEventLogger'
 import WordPopup from './WordPopup'
@@ -103,8 +103,24 @@ export default function ArticleReader({
   const [completed, setCompleted] = useState(segment.is_completed)
   const [addWordModal, setAddWordModal] = useState<{ word: string; context: string } | null>(null)
 
+  const contentRef = useRef<HTMLDivElement>(null)
   const textEn = overrideTextEn ?? segment.text_en
   const rawWords = overrideWordsJson ?? segment.words_json
+
+  const handleExportPDF = async () => {
+    const el = contentRef.current
+    if (!el) return
+    const html2pdf = (await import('html2pdf.js')).default
+    html2pdf()
+      .set({
+        margin: [10, 10, 10, 10],
+        filename: `${segment.title || 'article'}.pdf`,
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(el)
+      .save()
+  }
 
   // Build word lookup map filtered by density
   const wordMap = useMemo(() => {
@@ -179,9 +195,15 @@ export default function ArticleReader({
           {expanded ? 'Collapse' : 'Expand'} annotations
         </button>
 
-        {/* Density toggle */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-text-secondary mr-1">注释密度</span>
+        {/* Density toggle + export */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportPDF}
+            className="flex items-center gap-1 text-xs text-text-secondary hover:text-accent"
+          >
+            <Download className="w-3.5 h-3.5" /> PDF
+          </button>
+          <span className="text-xs text-text-secondary">注释密度</span>
           {(['few', 'medium', 'all'] as DensityLevel[]).map(level => (
             <button
               key={level}
@@ -204,7 +226,8 @@ export default function ArticleReader({
         : segment.audio_url && <AudioPlayer src={segment.audio_url} />
       }
 
-      {/* Article text */}
+      {/* Article text + glossary (wrapped for PDF export) */}
+      <div ref={contentRef}>
       <div className="leading-7 text-text-primary text-base">
         {annotatedContent.map(token =>
           token.isWord && token.word ? (
@@ -230,6 +253,7 @@ export default function ArticleReader({
       {rawWords && rawWords.length > 0 && (
         <GlossarySection words={rawWords} />
       )}
+      </div>{/* end contentRef */}
 
       {/* Complete button */}
       {!hideComplete && !completed && (

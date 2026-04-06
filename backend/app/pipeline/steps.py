@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 
 from app.services.llm import call_llm
-from app.services.youtube import search_youtube, fetch_transcript, filter_by_view_count
+from app.services.youtube import search_youtube, fetch_transcript, filter_videos
 from app.services.article import fetch_all_rss_candidates, extract_article_text
 from app.services.segmenter import segment_content
 from app.services.annotator import annotate_vocabulary
@@ -97,9 +97,9 @@ async def step1_fetch_candidates() -> list[dict]:
 
         await session.commit()
 
-    # Filter YouTube by view count (min 10000 views)
+    # Filter YouTube: min 10000 views, max 10 min, min 1 min
     if yt_results:
-        yt_results = await filter_by_view_count(yt_results, min_views=10000)
+        yt_results = await filter_videos(yt_results, min_views=10000, max_duration_sec=600)
 
     # Fetch RSS articles
     rss_results: list[dict] = []
@@ -250,11 +250,11 @@ COMBINED_SYSTEM = """You are an English learning content processor for a Chinese
 Given an English article/transcript, do ALL THREE tasks in ONE response:
 
 1. **Segment**: Split into semantic segments by major topic. Rules:
-   - Under 500 words: DO NOT split. Return exactly 1 segment with the full text.
-   - 500-1500 words: 2-3 segments (~300+ words each)
-   - 1500-3000 words: 4-6 segments (~300-400 words each)
-   - Over 3000 words: target ~300 words per segment
-   - Each segment MUST be at least 200 words. Do NOT create tiny segments.
+   - Under 500 words: DO NOT split. Return exactly 1 segment.
+   - 500+ words: Split into 2-3 segments MAX. Never more than 3 segments.
+   - Each segment MUST be at least 200 words.
+   - Format each segment's text_en with proper paragraphs (use \n\n between paragraphs).
+   - Add a clear, descriptive title for each segment.
 
 2. **Annotate**: For each segment, identify 25-50 vocabulary words above CET-4 level.
    CRITICAL: You MUST distribute importance_score across the full range:

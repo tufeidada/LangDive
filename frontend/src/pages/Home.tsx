@@ -28,7 +28,7 @@ export default function Home() {
               tab === t ? 'bg-accent text-primary' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            {t === 'today' ? 'Today' : t === 'history' ? 'Archive' : 'Vocab'}
+            {t === 'today' ? 'Now' : t === 'history' ? 'Archive' : 'Vocab'}
           </button>
         ))}
       </div>

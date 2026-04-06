@@ -31,7 +31,7 @@ async def test_step1_fetch_candidates():
 
     with patch("app.pipeline.steps.call_llm", new_callable=AsyncMock, return_value=mock_queries):
         with patch("app.pipeline.steps.search_youtube", new_callable=AsyncMock, return_value=mock_yt_results):
-            with patch("app.pipeline.steps.filter_by_view_count", new_callable=AsyncMock, return_value=mock_yt_results):
+            with patch("app.pipeline.steps.filter_videos", new_callable=AsyncMock, return_value=mock_yt_results):
                 with patch("app.pipeline.steps.fetch_all_rss_candidates", return_value=mock_rss_results):
                     with patch("app.pipeline.steps.AsyncSessionLocal") as mock_session_cls:
                         mock_session = AsyncMock()
