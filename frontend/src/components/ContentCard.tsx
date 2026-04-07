@@ -23,13 +23,14 @@ export default function ContentCard({ item }: { item: ContentItem }) {
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-text-primary font-medium truncate">{item.title}</h3>
-          <div className="flex items-center gap-2 mt-1 text-sm text-text-secondary">
+          <div className="flex items-center gap-2 mt-1 text-sm text-text-secondary flex-wrap">
             <span>{item.source}</span>
             {item.difficulty && (
               <span className={`px-1.5 py-0.5 rounded text-xs ${DIFFICULTY_COLORS[item.difficulty] || ''}`}>
                 {item.difficulty}
               </span>
             )}
+            {item.read_time && <span>{item.read_time}</span>}
             {item.segment_count > 1 && <span>{item.segment_count} segments</span>}
             {item.preview_word_count > 0 && <span>{item.preview_word_count} words</span>}
           </div>

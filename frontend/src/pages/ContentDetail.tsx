@@ -8,6 +8,7 @@ import SegmentList from '../components/SegmentList'
 import PreviewScreen from '../components/PreviewScreen'
 import ArticleReader from '../components/ArticleReader'
 import VideoPlayer from '../components/VideoPlayer'
+import YouTubeEmbed from '../components/YouTubeEmbed'
 import type { ContentDetail as ContentDetailType, Segment, VocabWord } from '../types'
 
 type Phase = 'full' | 'segments' | 'preview' | 'segment-reading'
@@ -178,17 +179,9 @@ export default function ContentDetail() {
             })()}
           </div>
 
-          {/* YouTube embed for video content */}
+          {/* YouTube embed for video content — uses IFrame API for seek support */}
           {content.type === 'video' && videoId && (
-            <div className="aspect-video mb-4 rounded-lg overflow-hidden">
-              <iframe
-                src={`https://www.youtube.com/embed/${videoId}`}
-                title={content.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
+            <YouTubeEmbed videoId={videoId} />
           )}
 
           <ArticleReader

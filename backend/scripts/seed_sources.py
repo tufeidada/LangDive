@@ -14,7 +14,7 @@ SOURCES = [
     # Layer 1: YouTube Channels
     {"name": "Lex Fridman Podcast", "type": "youtube_channel", "layer": 1, "priority": 95,
      "url": "https://youtube.com/@lexfridman",
-     "extra_config": {"channel_id": "UCSHZKJJfhK1O0g4PenTXSGQ", "uploads_playlist": "UUSHZKJJfhK1O0g4PenTXSGQ", "min_duration_minutes": 10},
+     "extra_config": {"channel_id": "UCSHZKyawb77ixDdsGog4iWA", "uploads_playlist": "UUSHZKyawb77ixDdsGog4iWA", "min_duration_minutes": 10},
      "tags": ["AI", "Tech"], "default_difficulty": "B2"},
 
     {"name": "All-In Podcast", "type": "youtube_channel", "layer": 1, "priority": 90,
@@ -29,7 +29,7 @@ SOURCES = [
 
     {"name": "a16z", "type": "youtube_channel", "layer": 1, "priority": 80,
      "url": "https://youtube.com/@a16z",
-     "extra_config": {"channel_id": "UCOmOuZ7AxVYnatig15jk5Sg", "uploads_playlist": "UUOmOuZ7AxVYnatig15jk5Sg", "min_duration_minutes": 5},
+     "extra_config": {"channel_id": "UC9cn0TuPq4dnbTY-CBsm8XA", "uploads_playlist": "UU9cn0TuPq4dnbTY-CBsm8XA", "min_duration_minutes": 5},
      "tags": ["Tech", "Finance"], "default_difficulty": "B2"},
 
     {"name": "Y Combinator", "type": "youtube_channel", "layer": 1, "priority": 80,
@@ -44,17 +44,17 @@ SOURCES = [
 
     {"name": "Acquired Podcast", "type": "youtube_channel", "layer": 1, "priority": 85,
      "url": "https://youtube.com/@AcquiredFM",
-     "extra_config": {"channel_id": "UC_5RqZ5L3Kc3VvJwXLOTZjQ", "uploads_playlist": "UU_5RqZ5L3Kc3VvJwXLOTZjQ", "min_duration_minutes": 15},
+     "extra_config": {"channel_id": "UCyFqFYfTW2VoIQKylJ04Rtw", "uploads_playlist": "UUyFqFYfTW2VoIQKylJ04Rtw", "min_duration_minutes": 15},
      "tags": ["Tech", "Finance"], "default_difficulty": "B2"},
 
     {"name": "Patrick Boyle", "type": "youtube_channel", "layer": 1, "priority": 80,
      "url": "https://youtube.com/@PBoyle",
-     "extra_config": {"channel_id": "UCASM0cgfkJxQ1ICmRilfHLQ", "uploads_playlist": "UUASM0cgfkJxQ1ICmRilfHLQ", "min_duration_minutes": 8},
+     "extra_config": {"channel_id": "UCASM0cgfkJxQ1ICmRilfHLw", "uploads_playlist": "UUASM0cgfkJxQ1ICmRilfHLw", "min_duration_minutes": 8},
      "tags": ["Finance"], "default_difficulty": "B2"},
 
     {"name": "Ben Felix", "type": "youtube_channel", "layer": 1, "priority": 75,
      "url": "https://youtube.com/@BenFelixCSI",
-     "extra_config": {"channel_id": "UC5cN4PGIkBGo_c7q0UNc-Rg", "uploads_playlist": "UU5cN4PGIkBGo_c7q0UNc-Rg", "min_duration_minutes": 5},
+     "extra_config": {"channel_id": "UCDXTQ8nWmx_EhZ2v-kp7QxA", "uploads_playlist": "UUDXTQ8nWmx_EhZ2v-kp7QxA", "min_duration_minutes": 5},
      "tags": ["Finance"], "default_difficulty": "B2"},
 
     {"name": "Tim Ferriss Show", "type": "youtube_channel", "layer": 1, "priority": 75,

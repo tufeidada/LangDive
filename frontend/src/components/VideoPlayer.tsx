@@ -1,10 +1,11 @@
 // src/components/VideoPlayer.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Languages } from 'lucide-react'
 import { useEventLogger } from '../hooks/useEventLogger'
 import SubtitlePanel from './SubtitlePanel'
 import AudioPlayer from './AudioPlayer'
 import GlossarySection from './GlossarySection'
+import YouTubeEmbed from './YouTubeEmbed'
 import { markSegmentComplete, getTranscript } from '../services/api'
 import type { ContentDetail, Segment } from '../types'
 
@@ -20,6 +21,9 @@ export default function VideoPlayer({ content, segment }: Props) {
   const [completed, setCompleted] = useState(segment.is_completed)
   const [subtitles, setSubtitles] = useState<{ text: string; start: number; duration: number }[]>([])
 
+  // Ref to imperatively seek the YouTube player
+  const seekRef = useRef<((t: number) => void) | null>(null)
+
   // Extract video ID from URL
   const videoId = content.url?.match(/v=([^&]+)/)?.[1] || ''
 
@@ -30,7 +34,6 @@ export default function VideoPlayer({ content, segment }: Props) {
         if (entries && entries.length > 0) {
           setSubtitles(entries)
         } else {
-          // Fallback: split segment text into pseudo-subtitles with fake timing
           const fallback = segment.text_en.split(/[.!?]+/).filter(s => s.trim()).map((text, i) => ({
             text: text.trim(),
             start: i * 5,
@@ -40,7 +43,6 @@ export default function VideoPlayer({ content, segment }: Props) {
         }
       })
       .catch(() => {
-        // On error, fall back to fake subtitles
         const fallback = segment.text_en.split(/[.!?]+/).filter(s => s.trim()).map((text, i) => ({
           text: text.trim(),
           start: i * 5,
@@ -56,8 +58,11 @@ export default function VideoPlayer({ content, segment }: Props) {
   }
 
   const handleSeek = (time: number) => {
+    // Seek the actual YouTube player
+    if (seekRef.current) {
+      seekRef.current(time)
+    }
     setCurrentTime(time)
-    // If using iframe API, could seek the video here
   }
 
   const handleComplete = async () => {
@@ -68,16 +73,14 @@ export default function VideoPlayer({ content, segment }: Props) {
 
   return (
     <div>
-      {/* YouTube embed */}
+      {/* YouTube embed with IFrame API for seek support */}
       {videoId && (
-        <div className="aspect-video mb-4 rounded-lg overflow-hidden">
-          <iframe
-            src={`https://www.youtube.com/embed/${videoId}?start=${Math.floor(segment.start_time || 0)}`}
-            className="w-full h-full"
-            allowFullScreen
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope"
-          />
-        </div>
+        <YouTubeEmbed
+          videoId={videoId}
+          startTime={segment.start_time || 0}
+          onTimeUpdate={setCurrentTime}
+          seekRef={seekRef}
+        />
       )}
 
       {/* Audio player for segment TTS */}
@@ -95,7 +98,7 @@ export default function VideoPlayer({ content, segment }: Props) {
         </button>
       </div>
 
-      {/* Subtitles */}
+      {/* Subtitles with click-to-seek */}
       <SubtitlePanel
         subtitles={subtitles}
         currentTime={currentTime}
