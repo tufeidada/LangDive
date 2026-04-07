@@ -6,8 +6,8 @@ from app.models import Base
 
 @pytest.mark.asyncio
 async def test_create_all_tables():
+    # NEVER drop_all — just verify create_all works without destroying data
     async with async_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     async with async_engine.connect() as conn:
         tables = await conn.run_sync(
