@@ -356,11 +356,26 @@ async def step1_ai_ranking() -> list[dict]:
             ranked = [{"id": c.id, "score": 0.5, "selected": i < 5, "reason": "fallback"}
                       for i, c in enumerate(sorted(pending, key=lambda x: x.source_layer))]
 
-        # Determine selected IDs
+        # Determine selected IDs (LLM may return id as string or int)
         selected_ids = set(forced_ids)  # always include forced
         for item in ranked:
-            if item.get("selected") and item.get("id") in candidate_map:
-                selected_ids.add(item["id"])
+            try:
+                item_id = int(item.get("id", 0))
+            except (ValueError, TypeError):
+                continue
+            if item.get("selected") and item_id in candidate_map:
+                selected_ids.add(item_id)
+
+        # Fallback: if LLM selected 0, pick top 5 by score
+        if len(selected_ids) == 0 and ranked:
+            sorted_by_score = sorted(ranked, key=lambda x: float(x.get("score", 0)), reverse=True)
+            for item in sorted_by_score[:5]:
+                try:
+                    item_id = int(item.get("id", 0))
+                    if item_id in candidate_map:
+                        selected_ids.add(item_id)
+                except (ValueError, TypeError):
+                    continue
 
         # Enforce max 5
         selected_ids_list = list(selected_ids)[:5]
@@ -376,7 +391,13 @@ async def step1_ai_ranking() -> list[dict]:
             selected_ids = {c.id for c in selected_objs}
 
         # Update statuses and scores
-        score_map = {item.get("id"): item for item in ranked if isinstance(item.get("id"), int)}
+        score_map = {}
+        for item in ranked:
+            try:
+                item_id = int(item.get("id", 0))
+                score_map[item_id] = item
+            except (ValueError, TypeError):
+                continue
         for c in candidates:
             rank_info = score_map.get(c.id, {})
             c.ai_score = rank_info.get("score")
