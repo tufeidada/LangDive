@@ -121,3 +121,22 @@ async def get_stats(days: int = Query(default=7, ge=1, le=365), db: AsyncSession
         "vocab_by_status": vocab_by_status,
         "daily_activity": list(daily.values()),
     }
+
+
+@router.get("/pipeline-status")
+async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
+    """Return the latest pipeline run status from event_log."""
+    result = await db.execute(
+        select(EventLog)
+        .where(EventLog.event_type == "pipeline_run")
+        .order_by(EventLog.created_at.desc())
+        .limit(1)
+    )
+    latest = result.scalar_one_or_none()
+    if latest is None:
+        return {"status": "no_runs", "last_run": None, "details": {}}
+    return {
+        "status": (latest.extra_json or {}).get("status", "unknown"),
+        "last_run": latest.created_at,
+        "details": latest.extra_json or {},
+    }

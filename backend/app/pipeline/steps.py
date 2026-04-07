@@ -735,6 +735,9 @@ async def step3_extract_content(selected: list[dict]) -> list[dict]:
             if video_id:
                 transcript = fetch_transcript(video_id)
                 if transcript:
+                    if item.get("truncated") and transcript:
+                        transcript = [t for t in transcript if t["start"] < 600]
+                        logger.info(f"Truncated transcript to first 10 min ({len(transcript)} entries)")
                     item["content_text"] = " ".join(t["text"] for t in transcript)
                     item["has_subtitles"] = True
                     item["transcript_raw"] = transcript

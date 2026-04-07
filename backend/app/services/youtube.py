@@ -115,9 +115,12 @@ async def filter_videos(
         if views < min_views:
             logger.info(f"Filtered: {vid} ({views} views < {min_views}): {r['title'][:40]}")
             continue
-        if dur > max_duration_sec:
-            logger.info(f"Filtered: {vid} ({dur}s > {max_duration_sec}s): {r['title'][:40]}")
+        if dur > 3600:  # >1 hour: skip entirely
+            logger.info(f"Filtered: {vid} (too long {dur}s): {r['title'][:40]}")
             continue
+        if dur > max_duration_sec:
+            r["truncated"] = True  # mark for truncation during extraction
+            r["duration"] = f"{dur // 60}:{dur % 60:02d} (first {max_duration_sec//60}min)"
         if dur < 60:
             logger.info(f"Filtered: {vid} (too short {dur}s): {r['title'][:40]}")
             continue
