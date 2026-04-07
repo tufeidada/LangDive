@@ -26,8 +26,18 @@ export default function Pool() {
     setError(null)
     try {
       const data = await getCandidates(d)
-      // API may return { candidates: [...] } or directly an array
-      setCandidates(Array.isArray(data) ? data : (data.candidates ?? []))
+      // API returns { date, total, by_status: { selected: [...], rejected: [...], ... } }
+      if (data && data.by_status) {
+        const all: any[] = []
+        for (const items of Object.values(data.by_status)) {
+          if (Array.isArray(items)) all.push(...items)
+        }
+        setCandidates(all)
+      } else if (Array.isArray(data)) {
+        setCandidates(data)
+      } else {
+        setCandidates([])
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to load candidates')
     } finally {

@@ -67,8 +67,8 @@ export default function SourceManager() {
   }
 
   useEffect(() => {
-    if (expanded && sources.length === 0) load()
-  }, [expanded])
+    load()
+  }, [])
 
   const startEdit = (s: Source) => {
     setEditingId(s.id)
