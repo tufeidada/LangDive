@@ -528,12 +528,18 @@ async def step1_ai_ranking() -> list[dict]:
         for c in candidates:
             if c.id not in selected_ids:
                 continue
+            # Look up source name from ContentSource table
+            source_name = ""
+            if c.source_id:
+                src = await session.get(ContentSource, c.source_id)
+                if src:
+                    source_name = src.name
             selected_dicts.append({
                 "candidate_id": c.id,
                 "title": c.title,
                 "url": c.url,
                 "type": c.type or "article",
-                "source": "",
+                "source": source_name,
                 "difficulty": c.estimated_difficulty,
                 "video_id": _extract_video_id(c.url) if c.type == "video" else None,
                 "duration": c.duration,
@@ -885,14 +891,18 @@ async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:
                     if "level" not in w:
                         score = w.get("importance_score", 0.5)
                         w["level"] = "Advanced" if score >= 0.8 else "IELTS" if score >= 0.5 else "CET-6"
-                preview = sorted(words, key=lambda w: w.get("importance_score", 0), reverse=True)[:5]
+                preview = []
+                for w in sorted(words, key=lambda w: w.get("importance_score", 0), reverse=True)[:5]:
+                    pw = dict(w)
+                    pw["example_in_context"] = w.get("example_en", "")
+                    preview.append(pw)
                 seg["preview_words"] = preview
                 all_words.extend(words)
                 all_preview.extend(preview)
 
             item["segments"] = segments
             item["words_json"] = all_words
-            item["preview_words_json"] = all_preview[:10]
+            item["preview_words_json"] = all_preview  # actual sum across segments, no cap
 
     return items
 
@@ -996,6 +1006,12 @@ async def step9_store(items: list[dict]) -> None:
             if difficulty not in allowed_difficulties:
                 difficulty = "B1"  # default
 
+            # Compute read_time for articles; pass through duration for videos
+            read_time = item.get("read_time")
+            if not read_time and content_type != "video" and text:
+                word_count = len(text.split())
+                read_time = f"{max(1, word_count // 200)} min read"
+
             # For video content, store raw transcript in tags field for the transcript API endpoint
             tags = item.get("tags")
             if content_type == "video" and item.get("transcript_raw"):
@@ -1017,7 +1033,7 @@ async def step9_store(items: list[dict]) -> None:
                 has_subtitles=item.get("has_subtitles", False),
                 date=date.today(),
                 duration=item.get("duration"),
-                read_time=item.get("read_time"),
+                read_time=read_time,
                 content_hash=c_hash,
             )
             session.add(content_obj)

@@ -95,8 +95,19 @@ def extract_article_text(url: str, min_words: int = 300) -> str | None:
             include_comments=False,
             include_tables=False,
             favor_precision=True,     # less noise
+            output_format='txt',      # preserve paragraph breaks (\n\n)
         )
         text = _clean_article_text(text)
+
+        # Post-process: ensure paragraph breaks exist between long lines
+        if text and '\n\n' not in text:
+            lines = text.split('\n')
+            rebuilt = []
+            for line in lines:
+                if rebuilt and len(line) > 50 and len(rebuilt[-1]) > 50:
+                    rebuilt.append('')  # insert blank line = paragraph break
+                rebuilt.append(line)
+            text = '\n'.join(rebuilt)
 
         if not text:
             return None
