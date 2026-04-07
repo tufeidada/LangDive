@@ -1,7 +1,7 @@
 // src/components/ArticleReader.tsx
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { Eye, EyeOff, Play, Pause, Download } from 'lucide-react'
-import { markSegmentComplete, getVocab } from '../services/api'
+import { Eye, EyeOff, Play, Pause, Download, Bookmark, Volume2, Lightbulb } from 'lucide-react'
+import { markSegmentComplete, getVocab, createBookmark, explainSentence } from '../services/api'
 import { useEventLogger } from '../hooks/useEventLogger'
 import WordPopup from './WordPopup'
 import GlossarySection from './GlossarySection'
@@ -103,6 +103,9 @@ export default function ArticleReader({
   const [completed, setCompleted] = useState(segment.is_completed)
   const [addWordModal, setAddWordModal] = useState<{ word: string; context: string } | null>(null)
   const [userVocab, setUserVocab] = useState<Map<string, string>>(new Map())
+  const [hoveredSentenceIdx, setHoveredSentenceIdx] = useState<number | null>(null)
+  const [explainPopup, setExplainPopup] = useState<{ text: string; loading: boolean } | null>(null)
+  const [bookmarkedSentences, setBookmarkedSentences] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     getVocab().then(list => {
@@ -131,6 +134,61 @@ export default function ArticleReader({
       .save()
   }
 
+  // Split text into sentences for sentence-level actions
+  const sentences = useMemo(() => {
+    const parts: string[] = []
+    // Split on sentence-ending punctuation followed by space or end of string
+    const regex = /[^.!?]*[.!?]+(?:\s+|$)/g
+    let match
+    let lastIndex = 0
+    while ((match = regex.exec(textEn)) !== null) {
+      parts.push(match[0])
+      lastIndex = regex.lastIndex
+    }
+    // Remainder (no trailing punctuation)
+    if (lastIndex < textEn.length) {
+      parts.push(textEn.slice(lastIndex))
+    }
+    return parts.filter(s => s.trim().length > 0)
+  }, [textEn])
+
+  const handleSentenceBookmark = async (sentence: string) => {
+    const trimmed = sentence.trim()
+    try {
+      await createBookmark({
+        content_id: contentId,
+        segment_index: segment.segment_index,
+        sentence_text: trimmed,
+      })
+      setBookmarkedSentences(prev => new Set(prev).add(trimmed))
+      log('sentence_bookmark', { content_id: contentId, sentence: trimmed.slice(0, 60) })
+    } catch {
+      // silently ignore
+    }
+  }
+
+  const handleSentenceListen = (sentence: string) => {
+    const trimmed = sentence.trim()
+    if (!trimmed) return
+    window.speechSynthesis.cancel()
+    const utt = new SpeechSynthesisUtterance(trimmed)
+    utt.lang = 'en-US'
+    window.speechSynthesis.speak(utt)
+    log('sentence_listen', { content_id: contentId, sentence: trimmed.slice(0, 60) })
+  }
+
+  const handleSentenceExplain = async (sentence: string) => {
+    const trimmed = sentence.trim()
+    setExplainPopup({ text: '', loading: true })
+    log('sentence_explain', { content_id: contentId, sentence: trimmed.slice(0, 60) })
+    try {
+      const res = await explainSentence(trimmed)
+      setExplainPopup({ text: res.explanation, loading: false })
+    } catch {
+      setExplainPopup({ text: '解释失败，请稍后重试。', loading: false })
+    }
+  }
+
   // Build word lookup map filtered by density and user vocab status
   const wordMap = useMemo(() => {
     const map = new Map<string, VocabWord>()
@@ -157,19 +215,6 @@ export default function ArticleReader({
     }
     return map
   }, [rawWords])
-
-  // Annotate text: split into tokens, mark annotated words
-  const annotatedContent = useMemo(() => {
-    const tokens = textEn.split(/(\s+)/)
-    return tokens.map((token, i) => {
-      const clean = token.replace(/[^a-zA-Z'-]/g, '').toLowerCase()
-      const wordData = wordMap.get(clean)
-      if (wordData) {
-        return { key: i, text: token, word: wordData, isWord: true }
-      }
-      return { key: i, text: token, word: null, isWord: false }
-    })
-  }, [textEn, wordMap])
 
   const handleWordClick = (word: VocabWord, e: React.MouseEvent) => {
     log('word_lookup', { word: word.word })
@@ -240,24 +285,70 @@ export default function ArticleReader({
       {/* Article text + glossary (wrapped for PDF export) */}
       <div ref={contentRef}>
       <div className="leading-7 text-text-primary text-base">
-        {annotatedContent.map(token =>
-          token.isWord && token.word ? (
+        {sentences.map((sentence, sIdx) => {
+          const tokens = sentence.split(/(\s+)/)
+          const isHovered = hoveredSentenceIdx === sIdx
+          const isBookmarked = bookmarkedSentences.has(sentence.trim())
+          return (
             <span
-              key={token.key}
-              onClick={(e) => handleWordClick(token.word!, e)}
-              className={`cursor-pointer border-b border-dashed border-text-secondary/50 hover:border-accent ${
-                expanded ? LEVEL_COLORS[token.word.level] || '' : ''
-              }`}
+              key={sIdx}
+              className={`relative inline transition-colors duration-100 ${isHovered ? 'bg-accent/10 rounded' : ''}`}
+              onMouseEnter={() => setHoveredSentenceIdx(sIdx)}
+              onMouseLeave={() => setHoveredSentenceIdx(null)}
             >
-              {token.text}
-              {expanded && (
-                <span className="text-xs text-text-secondary ml-0.5">({token.word.meaning_zh})</span>
+              {tokens.map((token, tIdx) => {
+                const clean = token.replace(/[^a-zA-Z'-]/g, '').toLowerCase()
+                const wordData = wordMap.get(clean)
+                if (wordData) {
+                  return (
+                    <span
+                      key={tIdx}
+                      onClick={(e) => handleWordClick(wordData, e)}
+                      className={`cursor-pointer border-b border-dashed border-text-secondary/50 hover:border-accent ${
+                        expanded ? LEVEL_COLORS[wordData.level] || '' : ''
+                      }`}
+                    >
+                      {token}
+                      {expanded && (
+                        <span className="text-xs text-text-secondary ml-0.5">({wordData.meaning_zh})</span>
+                      )}
+                    </span>
+                  )
+                }
+                return <span key={tIdx}>{token}</span>
+              })}
+              {/* Sentence toolbar — appears on hover */}
+              {isHovered && (
+                <span
+                  className="inline-flex items-center gap-0.5 ml-1 align-middle"
+                  onMouseEnter={() => setHoveredSentenceIdx(sIdx)}
+                >
+                  <button
+                    title="Bookmark sentence"
+                    onClick={() => handleSentenceBookmark(sentence)}
+                    className={`p-0.5 rounded text-xs ${isBookmarked ? 'text-accent' : 'text-text-secondary hover:text-accent'}`}
+                  >
+                    <Bookmark className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    title="Listen to sentence"
+                    onClick={() => handleSentenceListen(sentence)}
+                    className="p-0.5 rounded text-xs text-text-secondary hover:text-accent"
+                  >
+                    <Volume2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    title="AI Explain"
+                    onClick={() => handleSentenceExplain(sentence)}
+                    className="p-0.5 rounded text-xs text-text-secondary hover:text-accent"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" />
+                  </button>
+                </span>
               )}
             </span>
-          ) : (
-            <span key={token.key}>{token.text}</span>
           )
-        )}
+        })}
       </div>
 
       {/* Glossary */}
@@ -294,6 +385,25 @@ export default function ArticleReader({
           contextSentence={addWordModal.context}
           onClose={() => setAddWordModal(null)}
         />
+      )}
+
+      {/* AI Explain popup */}
+      {explainPopup && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setExplainPopup(null)} />
+          <div className="fixed z-50 bottom-6 left-1/2 -translate-x-1/2 w-[min(480px,90vw)] bg-card border border-border rounded-xl shadow-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-medium text-sm text-text-primary flex items-center gap-1">
+                <Lightbulb className="w-4 h-4 text-accent" /> AI 解释
+              </span>
+              <button onClick={() => setExplainPopup(null)} className="text-text-secondary hover:text-text-primary text-lg leading-none">&times;</button>
+            </div>
+            {explainPopup.loading
+              ? <p className="text-sm text-text-secondary animate-pulse">正在分析…</p>
+              : <p className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">{explainPopup.text}</p>
+            }
+          </div>
+        </>
       )}
     </div>
   )

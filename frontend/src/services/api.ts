@@ -61,6 +61,23 @@ export const submitUrl = (url: string) =>
     { method: 'POST', body: JSON.stringify({ url }) }
   )
 
+// Bookmarks
+export const getBookmarks = () => fetchJSON<any[]>('/bookmarks')
+export const createBookmark = (data: { content_id: number; segment_index: number; sentence_text: string; note?: string }) =>
+  fetchJSON<any>('/bookmarks', { method: 'POST', body: JSON.stringify(data) })
+export const deleteBookmark = (id: number) =>
+  fetchJSON<any>(`/bookmarks/${id}`, { method: 'DELETE' })
+
+// Sentence explain
+export const explainSentence = (sentence: string, context?: string) =>
+  fetchJSON<{ explanation: string }>('/sentences/explain', {
+    method: 'POST',
+    body: JSON.stringify({ sentence, context }),
+  })
+
+// Stats
+export const getStats = (days: number = 7) => fetchJSON<any>(`/stats?days=${days}`)
+
 // Events (fire-and-forget)
 export const logEvent = (event_type: string, data: Record<string, any> = {}) => {
   fetch(`${BASE}/events`, {

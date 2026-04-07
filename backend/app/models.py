@@ -158,6 +158,16 @@ class ContentSource(Base):
     )
 
 
+class Bookmark(Base):
+    __tablename__ = "bookmark"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    content_id: Mapped[int] = mapped_column(Integer)
+    segment_index: Mapped[int] = mapped_column(Integer)
+    sentence_text: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ContentCandidate(Base):
     __tablename__ = "content_candidate"
     id: Mapped[int] = mapped_column(primary_key=True)
