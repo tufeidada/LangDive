@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Vocabulary
 from app.services.srs import calculate_next_review
 from app.services.annotator import annotate_custom_word
+from app.services.dictionary import lookup_word
 
 router = APIRouter()
 
@@ -55,11 +56,30 @@ async def get_review_words(db: AsyncSession = Depends(get_db)):
             .order_by(Vocabulary.next_review).limit(50))
     result = await db.execute(stmt)
     items = result.scalars().all()
-    return [{"word": v.word, "ipa": v.ipa, "meaning_zh": v.meaning_zh,
-             "detail_zh": v.detail_zh, "example_en": v.example_en,
-             "example_zh": v.example_zh, "level": v.level,
-             "srs_level": v.srs_level, "again_count": v.again_count}
-            for v in items]
+    rows = []
+    for v in items:
+        ipa = v.ipa
+        detail_zh = v.detail_zh
+        # Enrich missing fields from ECDICT if available
+        if not v.ipa or not v.example_en:
+            entry = lookup_word(v.word)
+            if entry:
+                if not ipa:
+                    ipa = entry.get('phonetic', '')
+                if not detail_zh:
+                    detail_zh = entry.get('translation', '').replace('\\n', '; ')
+        rows.append({
+            "word": v.word,
+            "ipa": ipa,
+            "meaning_zh": v.meaning_zh,
+            "detail_zh": detail_zh,
+            "example_en": v.example_en,
+            "example_zh": v.example_zh,
+            "level": v.level,
+            "srs_level": v.srs_level,
+            "again_count": v.again_count,
+        })
+    return rows
 
 
 @router.post("/vocab")

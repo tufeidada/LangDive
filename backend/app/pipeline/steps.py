@@ -12,6 +12,7 @@ from app.services.segmenter import segment_content
 from app.services.annotator import annotate_vocabulary
 from app.services.tts import generate_segment_audio
 from app.services.cache import get_cached, set_cached
+from app.services.dictionary import lookup_word, get_word_level
 from app.services.fetcher import (
     fetch_youtube_channels,
     fetch_blog_rss,
@@ -787,9 +788,9 @@ Given an English article/transcript, do ALL THREE tasks in ONE response:
 
 2. **Annotate**: For each segment, identify 25-50 vocabulary words above CET-4 level.
    CRITICAL: You MUST distribute importance_score across the full range:
-   - 5-10 words with importance_score 0.9-1.0 (essential topic-specific terms)
-   - 10-15 words with importance_score 0.6-0.8 (important but not critical)
-   - 10-15 words with importance_score 0.3-0.5 (nice-to-know, lower frequency)
+   - 8-12 words with importance_score 0.8-1.0 (essential topic-specific terms)
+   - 6-10 words with importance_score 0.5-0.8 (important but not critical)
+   - 4-8 words with importance_score 0.2-0.5 (nice-to-know, lower frequency)
    This distribution is REQUIRED — the UI uses importance_score to filter density levels.
    If all scores are above 0.8, the density filter breaks. Spread them out.
 
@@ -891,6 +892,14 @@ async def step4_segment_annotate_summarize(items: list[dict]) -> list[dict]:
                     if "level" not in w:
                         score = w.get("importance_score", 0.5)
                         w["level"] = "Advanced" if score >= 0.8 else "IELTS" if score >= 0.5 else "CET-6"
+                # Enrich words with ECDICT data for any missing fields
+                for w in words:
+                    ecdict = lookup_word(w.get("word", ""))
+                    if ecdict:
+                        if not w.get("ipa"):
+                            w["ipa"] = ecdict.get("phonetic", "")
+                        if not w.get("level"):
+                            w["level"] = get_word_level(w["word"]) or w.get("level", "CET-6")
                 preview = []
                 for w in sorted(words, key=lambda w: w.get("importance_score", 0), reverse=True)[:5]:
                     pw = dict(w)

@@ -162,9 +162,15 @@ export default function SourceManager() {
                   <span className={`font-medium ${s.is_active ? 'text-text-primary' : 'text-text-secondary line-through'}`}>
                     {s.name}
                   </span>
-                  <span className="ml-2 text-xs text-text-secondary">
+                  <span className="ml-2 text-xs text-text-secondary inline-flex items-center gap-1.5">
                     {TYPE_LABELS[s.type] || s.type}
-                    {s.candidate_count != null && ` · ${s.candidate_count} candidates`}
+                    {s.candidate_count != null && s.candidate_count > 0 ? (
+                      <span className="px-1.5 py-0.5 rounded-full bg-accent/20 text-accent font-medium">
+                        {s.candidate_count}
+                      </span>
+                    ) : (
+                      <span className="text-text-secondary/50">· no candidates</span>
+                    )}
                   </span>
                 </span>
 

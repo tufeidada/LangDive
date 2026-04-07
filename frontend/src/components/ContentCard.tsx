@@ -1,6 +1,6 @@
 // src/components/ContentCard.tsx
 import { Link } from 'react-router-dom'
-import { BookOpen, Video, AlertCircle } from 'lucide-react'
+import { BookOpen, Video, AlertCircle, Clock } from 'lucide-react'
 import type { ContentItem } from '../types'
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -11,30 +11,52 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 }
 
 export default function ContentCard({ item }: { item: ContentItem }) {
+  const isVideo = item.type === 'video'
+  const timeLabel = isVideo ? item.duration : item.read_time
+
   return (
     <Link to={`/content/${item.id}`} className="block bg-card rounded-xl p-4 border border-border hover:border-accent/50 transition-colors">
       <div className="flex items-start gap-3">
-        <div className="mt-1">
-          {item.type === 'video' ? (
-            <Video className="w-5 h-5 text-red-400" />
+        <div className="mt-0.5 shrink-0">
+          {isVideo ? (
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-500/10">
+              <Video className="w-4 h-4 text-red-400" />
+            </div>
           ) : (
-            <BookOpen className="w-5 h-5 text-blue-400" />
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/10">
+              <BookOpen className="w-4 h-4 text-blue-400" />
+            </div>
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-text-primary font-medium truncate">{item.title}</h3>
-          <div className="flex items-center gap-2 mt-1 text-sm text-text-secondary flex-wrap">
-            <span>{item.source}</span>
+          {/* Source + type badge row */}
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-xs font-medium text-text-secondary truncate">{item.source}</span>
+            <span className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-medium ${
+              isVideo ? 'bg-red-600/15 text-red-400' : 'bg-blue-600/15 text-blue-400'
+            }`}>
+              {isVideo ? 'Video' : 'Article'}
+            </span>
+          </div>
+          {/* Title */}
+          <h3 className="text-text-primary font-medium leading-snug line-clamp-2">{item.title}</h3>
+          {/* Meta row */}
+          <div className="flex items-center gap-2 mt-1.5 text-xs text-text-secondary flex-wrap">
             {item.difficulty && (
-              <span className={`px-1.5 py-0.5 rounded text-xs ${DIFFICULTY_COLORS[item.difficulty] || ''}`}>
+              <span className={`px-1.5 py-0.5 rounded font-medium ${DIFFICULTY_COLORS[item.difficulty] || ''}`}>
                 {item.difficulty}
               </span>
             )}
-            {item.read_time && <span>{item.read_time}</span>}
+            {timeLabel && (
+              <span className="flex items-center gap-0.5">
+                <Clock className="w-3 h-3" />
+                {timeLabel}
+              </span>
+            )}
             {item.segment_count > 1 && <span>{item.segment_count} segments</span>}
             {item.preview_word_count > 0 && <span>{item.preview_word_count} words</span>}
           </div>
-          {!item.has_subtitles && (
+          {item.type === 'video' && !item.has_subtitles && (
             <div className="flex items-center gap-1 mt-1 text-xs text-yellow-500">
               <AlertCircle className="w-3 h-3" />
               <span>No subtitles available</span>

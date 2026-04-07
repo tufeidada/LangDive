@@ -1,6 +1,7 @@
 // src/pages/Review.tsx
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { CheckCircle, RotateCcw } from 'lucide-react'
+import { CheckCircle, RotateCcw, BookOpen } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import SRSCard from '../components/SRSCard'
 import { getReviewWords, reviewWord, logEvent } from '../services/api'
 import type { VocabEntry } from '../types'
@@ -102,10 +103,20 @@ export default function Review() {
 
   if (state === 'empty') {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3">
+      <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
         <CheckCircle className="w-12 h-12 text-status-mastered" />
-        <p className="text-text-primary font-medium">今日复习完成</p>
-        <p className="text-text-secondary text-sm">No words due for review today.</p>
+        <div>
+          <p className="text-text-primary font-medium text-lg">All caught up!</p>
+          <p className="text-text-secondary text-sm mt-1">No words due for review right now.</p>
+          <p className="text-text-secondary text-xs mt-0.5">Keep reading to build your vocabulary.</p>
+        </div>
+        <Link
+          to="/"
+          className="flex items-center gap-2 px-4 py-2 bg-accent text-primary rounded-lg text-sm font-medium hover:bg-accent/90 transition-colors"
+        >
+          <BookOpen className="w-4 h-4" />
+          Read Today's Content
+        </Link>
       </div>
     )
   }
