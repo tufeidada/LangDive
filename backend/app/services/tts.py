@@ -45,7 +45,7 @@ def _qwen_synthesize(text: str) -> bytes:
     import dashscope
     import urllib.request
     resp = dashscope.audio.qwen_tts.SpeechSynthesizer.call(
-        model="qwen3-tts-flash",
+        model="qwen3-tts-instruct-flash",
         api_key=settings.DASHSCOPE_API_KEY,
         text=text,
         voice="Cherry",
