@@ -9,9 +9,11 @@ import PreviewScreen from '../components/PreviewScreen'
 import ArticleReader from '../components/ArticleReader'
 import VideoPlayer from '../components/VideoPlayer'
 import YouTubeEmbed from '../components/YouTubeEmbed'
+import ShadowMode from '../components/ShadowMode'
+import DictationMode from '../components/DictationMode'
 import type { ContentDetail as ContentDetailType, Segment, VocabWord } from '../types'
 
-type Phase = 'full' | 'segments' | 'preview' | 'segment-reading'
+type Phase = 'full' | 'segments' | 'preview' | 'segment-reading' | 'shadow' | 'dictation'
 
 export default function ContentDetail() {
   const { id } = useParams<{ id: string }>()
@@ -97,8 +99,33 @@ export default function ContentDetail() {
       setPhase('segments')
     } else if (phase === 'segments') {
       setPhase('full')
+    } else if (phase === 'shadow') {
+      setPhase('full')
+    } else if (phase === 'dictation') {
+      setPhase('full')
     }
   }
+
+  // Build sentences list for shadow mode from all segments
+  const shadowSentences = useMemo((): string[] => {
+    const all: string[] = []
+    for (const seg of segments) {
+      if (!seg.text_en) continue
+      const regex = /[^.!?]*[.!?]+(?:\s+|$)/g
+      let match
+      let lastIndex = 0
+      while ((match = regex.exec(seg.text_en)) !== null) {
+        const s = match[0].trim()
+        if (s.length > 0) all.push(s)
+        lastIndex = regex.lastIndex
+      }
+      if (lastIndex < seg.text_en.length) {
+        const remainder = seg.text_en.slice(lastIndex).trim()
+        if (remainder.length > 0) all.push(remainder)
+      }
+    }
+    return all
+  }, [segments])
 
   if (loading) return <div className="text-text-secondary">Loading...</div>
   if (!content) return <div className="text-text-secondary">Content not found.</div>
@@ -125,7 +152,7 @@ export default function ContentDetail() {
   }
 
   const videoId = extractVideoId(content.url)
-  const isAtRoot = phase === 'full' || phase === 'segments'
+  const isAtRoot = phase === 'full' || phase === 'segments' || phase === 'shadow' || phase === 'dictation'
 
   return (
     <div>
@@ -150,13 +177,32 @@ export default function ContentDetail() {
       {phase === 'full' && fullModeSyntheticSegment && (
         <div>
           {/* Mode switcher buttons */}
-          <div className="flex gap-2 mb-4">
+          <div className="flex flex-wrap gap-2 mb-4">
             <button
               onClick={() => setPhase('segments')}
               className="text-sm px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:border-accent hover:text-accent transition-colors"
             >
               Segment Mode
             </button>
+            {shadowSentences.length > 0 && (
+              <button
+                onClick={() => {
+                  log('shadow_start', { content_id: content.id })
+                  setPhase('shadow')
+                }}
+                className="text-sm px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:border-accent hover:text-accent transition-colors"
+              >
+                Shadow
+              </button>
+            )}
+            {shadowSentences.length > 0 && (
+              <button
+                onClick={() => setPhase('dictation')}
+                className="text-sm px-3 py-1.5 rounded-lg border border-border text-text-secondary hover:border-accent hover:text-accent transition-colors"
+              >
+                Dictation
+              </button>
+            )}
             {(() => {
               // Collect all preview words across segments
               const allPreviewWords = segments.flatMap(s => s.preview_words_json ?? [])
@@ -216,6 +262,22 @@ export default function ContentDetail() {
         ) : (
           <ArticleReader segment={activeSegment} contentId={content.id} />
         )
+      )}
+
+      {/* Shadow reading mode */}
+      {phase === 'shadow' && shadowSentences.length > 0 && (
+        <ShadowMode
+          sentences={shadowSentences}
+          onExit={() => setPhase('full')}
+        />
+      )}
+
+      {/* Dictation mode */}
+      {phase === 'dictation' && shadowSentences.length > 0 && (
+        <DictationMode
+          sentences={shadowSentences}
+          onExit={() => setPhase('full')}
+        />
       )}
     </div>
   )
