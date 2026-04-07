@@ -2,6 +2,7 @@ import asyncio
 import logging
 from app.pipeline.steps import (
     step0_fetch_all_layers,
+    step05_preextract_and_filter,
     step1_ai_ranking,
     step3_extract_content,
     step4_segment_annotate_summarize,
@@ -21,7 +22,11 @@ async def run_pipeline():
     candidate_count = await step0_fetch_all_layers()
     logger.info(f"Step 0: {candidate_count} candidates fetched")
 
-    # Step 1: AI ranking — select top 5 from candidates
+    # Step 0.5: Pre-extract article content, filter junk, compute difficulty scores
+    passed = await step05_preextract_and_filter()
+    logger.info(f"Step 0.5: {passed} candidates passed quality filter")
+
+    # Step 1: AI ranking — select top 5 from candidates (using pre-computed scores)
     selected = await step1_ai_ranking()
     logger.info(f"Step 1: {len(selected)} selected for processing")
 

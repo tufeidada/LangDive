@@ -215,6 +215,113 @@ async def step0_fetch_all_layers() -> int:
     return inserted_count
 
 
+# ---------------------------------------------------------------------------
+# Step 0.5 (new): Pre-extract content + quality filter
+# ---------------------------------------------------------------------------
+
+async def step05_preextract_and_filter() -> int:
+    """Pre-extract article content for today's pending candidates.
+    Filters out paywall, empty, and low-quality content.
+    Calculates objective difficulty scores using ECDICT.
+
+    Returns: number of candidates that passed quality filter.
+    """
+    from app.services.dictionary import analyze_difficulty
+
+    today = date.today()
+    passed = 0
+    rejected = 0
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ContentCandidate).where(
+                and_(
+                    ContentCandidate.date == today,
+                    ContentCandidate.status == "pending",
+                    ContentCandidate.type == "article",  # only articles need pre-extract
+                )
+            )
+        )
+        candidates = result.scalars().all()
+
+        if not candidates:
+            logger.info("Step 0.5: No article candidates to pre-extract")
+            return 0
+
+        logger.info(f"Step 0.5: Pre-extracting {len(candidates)} article candidates...")
+
+        for c in candidates:
+            try:
+                text = extract_article_text(c.url, min_words=300)
+
+                if not text:
+                    c.status = "rejected"
+                    c.ai_reason = "No extractable content (paywall, empty, or too short)"
+                    rejected += 1
+                    continue
+
+                # Analyze difficulty with ECDICT
+                analysis = analyze_difficulty(text)
+                word_count = analysis["word_count"]
+                cefr = analysis["estimated_cefr"]
+                difficulty_score = analysis["difficulty_score"]
+
+                # Store results in candidate
+                c.estimated_word_count = word_count
+                c.estimated_difficulty = cefr
+                c.summary = text[:200] + "..."  # first 200 chars as preview
+
+                # Multi-dimensional quality score
+                # Relevance: check for topic keywords
+                text_lower = text.lower()
+                topic_keywords = {"ai", "artificial intelligence", "machine learning", "finance",
+                                  "technology", "startup", "investment", "management", "leadership",
+                                  "crypto", "blockchain", "cloud", "data", "software", "engineering"}
+                keyword_hits = sum(1 for kw in topic_keywords if kw in text_lower)
+                relevance = min(1.0, keyword_hits / 5)
+
+                # Quality: based on word count and structure
+                has_paragraphs = text.count("\n\n") >= 2
+                quality = min(1.0, (word_count / 2000) * 0.7 + (0.3 if has_paragraphs else 0))
+
+                # Difficulty match: how close to B1-B2 target (sweet spot around 0.3-0.5)
+                diff_match = 1.0 - abs(difficulty_score - 0.4) * 2
+                diff_match = max(0, min(1.0, diff_match))
+
+                # Composite score
+                c.ai_score = round(relevance * 0.4 + quality * 0.3 + diff_match * 0.3, 3)
+                c.ai_reason = f"words={word_count}, {cefr}, relevance={relevance:.1f}, quality={quality:.1f}, diff_match={diff_match:.1f}"
+
+                passed += 1
+
+            except Exception as e:
+                logger.warning(f"Step 0.5: Failed to pre-extract '{c.title[:40]}': {e}")
+                c.status = "rejected"
+                c.ai_reason = f"Extraction error: {str(e)[:100]}"
+                rejected += 1
+
+        # Also score video candidates (they don't need pre-extraction, just basic scoring)
+        video_result = await session.execute(
+            select(ContentCandidate).where(
+                and_(
+                    ContentCandidate.date == today,
+                    ContentCandidate.status == "pending",
+                    ContentCandidate.type == "video",
+                )
+            )
+        )
+        for c in video_result.scalars().all():
+            # Videos get a base score from source priority
+            c.ai_score = 0.7  # default decent score for whitelisted videos
+            c.ai_reason = "Video candidate (scored after transcript extraction)"
+            passed += 1
+
+        await session.commit()
+
+    logger.info(f"Step 0.5: Pre-extracted {passed} passed, {rejected} rejected")
+    return passed
+
+
 async def _layer3_search_fallback(session) -> list[dict]:
     """Layer 3 emergency fallback: LLM-generated YouTube search + RSS."""
     # Load recent queries to avoid repeats
@@ -305,13 +412,17 @@ async def step1_ai_ranking() -> list[dict]:
         forced = [c for c in candidates if c.status in ("user_promoted", "user_submitted")]
         pending = [c for c in candidates if c.status == "pending"]
 
-        # Build candidate list for LLM
+        # Build candidate list for LLM — now includes pre-computed scores and summaries
         candidate_lines = []
         candidate_map = {c.id: c for c in candidates}
         for c in candidates:
             layer_label = f"L{c.source_layer}"
+            score_str = f"score={c.ai_score:.2f}" if c.ai_score else "score=?"
+            words_str = f"{c.estimated_word_count}w" if c.estimated_word_count else "?w"
+            diff_str = c.estimated_difficulty or "?"
+            preview = (c.summary or "")[:80]
             candidate_lines.append(
-                f"[{c.id}] [{c.type or 'article'}] [{layer_label}] {c.title}"
+                f"[{c.id}] [{c.type or 'article'}] [{layer_label}] [{diff_str}] [{words_str}] [{score_str}] {c.title} | {preview}"
             )
 
         candidate_list_str = "\n".join(candidate_lines)

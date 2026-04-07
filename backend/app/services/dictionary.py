@@ -62,3 +62,59 @@ def get_cet4_words_from_ecdict() -> set[str]:
     """Return the set of CET-4 words from ECDICT tag data."""
     d = load_dictionary()
     return {word for word, entry in d.items() if 'cet4' in entry.get('tag', '')}
+
+
+def analyze_difficulty(text: str) -> dict:
+    """Analyze text difficulty using ECDICT word level distribution.
+
+    Returns: {
+        "word_count": int,
+        "unique_words": int,
+        "level_distribution": {"CET-4": N, "CET-6": N, "IELTS": N, "Advanced": N, "Unknown": N},
+        "level_pct": {"CET-4": 0.xx, ...},
+        "estimated_cefr": "B1" | "B2" | "C1" | ...,
+        "difficulty_score": 0.0-1.0,  # higher = harder
+    }
+    """
+    import re
+    d = load_dictionary()
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    unique = set(words)
+
+    levels = {"CET-4": 0, "CET-6": 0, "IELTS": 0, "Advanced": 0, "Unknown": 0}
+    for w in unique:
+        if len(w) < 2:
+            continue
+        level = get_word_level(w)
+        if level:
+            levels[level] += 1
+        elif w in d:
+            levels["CET-4"] += 1  # in dictionary but no level tag = basic
+        else:
+            levels["Unknown"] += 1
+
+    total_classified = sum(levels.values()) or 1
+    pct = {k: round(v / total_classified, 3) for k, v in levels.items()}
+
+    # Estimate CEFR based on distribution
+    hard_pct = pct.get("IELTS", 0) + pct.get("Advanced", 0) + pct.get("Unknown", 0)
+    if hard_pct > 0.3:
+        cefr = "C1"
+    elif hard_pct > 0.2:
+        cefr = "B2"
+    elif hard_pct > 0.1:
+        cefr = "B1"
+    else:
+        cefr = "A2"
+
+    # Difficulty score: 0 = easy, 1 = hard
+    difficulty_score = round(min(1.0, hard_pct * 2.5), 2)
+
+    return {
+        "word_count": len(words),
+        "unique_words": len(unique),
+        "level_distribution": levels,
+        "level_pct": pct,
+        "estimated_cefr": cefr,
+        "difficulty_score": difficulty_score,
+    }

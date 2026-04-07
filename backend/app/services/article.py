@@ -77,20 +77,49 @@ def fetch_all_rss_candidates() -> list[dict]:
     return all_candidates
 
 
-def extract_article_text(url: str) -> str | None:
+def extract_article_text(url: str, min_words: int = 300) -> str | None:
+    """Extract article text preserving paragraph structure and subheadings."""
     try:
         import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        })
         with urllib.request.urlopen(req, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
         if not html:
             return None
-        text = trafilatura.extract(html)
+
+        # Extract with formatting options to preserve structure
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            favor_precision=True,     # less noise
+        )
         text = _clean_article_text(text)
-        # Minimum 300 words
-        if text and len(text.split()) < 300:
-            logger.info(f"Rejected article (too short: {len(text.split())} words): {url}")
+
+        if not text:
             return None
+
+        word_count = len(text.split())
+
+        # Filter: too short = probably paywall, homepage, or stub
+        if word_count < min_words:
+            logger.info(f"Rejected (too short: {word_count} words): {url}")
+            return None
+
+        # Filter: paywall indicators
+        paywall_markers = [
+            "subscribe to continue", "sign up to read", "members only",
+            "premium content", "create a free account", "already a subscriber",
+            "this content is for subscribers", "unlock this article",
+        ]
+        text_lower = text.lower()
+        for marker in paywall_markers:
+            if marker in text_lower and word_count < 500:
+                logger.info(f"Rejected (likely paywall): {url}")
+                return None
+
         return text
     except Exception as e:
         logger.error(f"Article extraction failed for {url}: {e}")
