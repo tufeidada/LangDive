@@ -4,6 +4,7 @@ import ContentDetail from './pages/ContentDetail'
 import Review from './pages/Review'
 import Settings from './pages/Settings'
 import Pool from './pages/Pool'
+import Dashboard from './pages/Dashboard'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
             <div className="flex gap-4">
               <NavLink to="/" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Home</NavLink>
               <NavLink to="/review" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Review</NavLink>
+              <NavLink to="/dashboard" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Stats</NavLink>
               <NavLink to="/settings" className={({isActive}) => isActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}>Settings</NavLink>
             </div>
           </div>
@@ -26,6 +28,7 @@ function App() {
             <Route path="/review" element={<Review />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/pool" element={<Pool />} />
+            <Route path="/dashboard" element={<Dashboard />} />
           </Routes>
         </main>
       </div>
